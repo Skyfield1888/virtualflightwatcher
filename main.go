@@ -9,10 +9,12 @@ import (
 	"github.com/Skyfield1888/Vatsim/commands"
 
 	"github.com/bwmarrin/discordgo"
+
+	_ "github.com/joho/godotenv/autoload"
 )
 
 func main() {
-	const token = "MTQyNTg3NTQzOTQyMzA2MjIyNw.GUf7Ej.Ay8bddah64jxRHYXcx56D6JgTcQMC6m2AgT6dk"
+	token := os.Getenv("DISCORD_TOKEN")
 	discord, err := discordgo.New("Bot " + token)
 	if err != nil {
 		fmt.Println("Error creating session:", err)
