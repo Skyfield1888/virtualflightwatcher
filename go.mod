@@ -1,4 +1,4 @@
-module github.com/Skyfield1888/Vatsim
+module github.com/Skyfield1888/virtualflightwatcher
 
 go 1.25.5
 
