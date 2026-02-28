@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sync"
+	"time"
 )
 
 // Declarations of the Struct for the url arguments and Json
@@ -67,7 +69,7 @@ type FlightPlanInfo struct {
 	FuelTime            string `json:"fuel_time"`
 	Remarks             string
 	Route               string
-	RevisionId          string `json:"revision_id"`
+	RevisionId          int    `json:"revision_id"`
 	AssignedTransponder string `json:"assigned_transponder"`
 }
 
@@ -141,8 +143,50 @@ type MilitaryRatingInfo struct {
 	LongName  string `json:"long_name"`
 }
 
+// Maps + RWMutex (multiple readers, one writer)
+var (
+	mu sync.RWMutex
+
+	pilotByCallsign map[string]PilotInfo
+	pilotByCid      map[string]PilotInfo
+
+	controllerByCallsign map[string]ControllerInfo
+	controllerByCid      map[string]ControllerInfo
+
+	atisByCallsign map[string]AtisInfo
+	atisByCid      map[string]AtisInfo
+
+	serverByIdent map[string]ServerInfo
+
+	PrefileByCallsign map[string]PrefileInfo
+	prefileByCid      map[string]PrefileInfo
+
+	facilityById        map[string]FacilityInfo
+	facilityByShortName map[string]FacilityInfo
+
+	ratingById        map[string]RatingInfo
+	ratingByShortName map[string]RatingInfo
+
+	pilotRatingById        map[string]PilotRatingInfo
+	pilotRatingByShortName map[string]PilotRatingInfo
+
+	militaryRatingById        map[string]MilitaryRatingInfo
+	militaryRatingByShortName map[string]MilitaryRatingInfo
+)
+
+// call on startup and evry 15sec
+func StartVatsimApi() {
+	fetchAndBuild()
+	go func() {
+		ticker := time.NewTicker(15 * time.Second)
+		defer ticker.Stop()
+		for range ticker.C {
+			fetchAndBuild()
+		}
+	}()
+}
+
 func getUrl(endpoint string, parameters []UrlArgument) string {
-	// Get the full url whith arguments for the endpoint
 	if len(parameters) == 0 {
 		return endpoint
 	}
@@ -156,181 +200,268 @@ func getUrl(endpoint string, parameters []UrlArgument) string {
 	return endpoint
 }
 
-// Functions for Searshing the specific instance in eatch data type
-func GetPilotFromCallsign(Callsign string) (PilotInfo, error) {
-	// Search the Pilots struct dor the right callsign
-	Json := GetVatsimInfo()
-	for _, Pilot := range Json.Pilots {
-		if Pilot.Callsign == Callsign {
-			return Pilot, nil
-		}
-	}
-	return PilotInfo{}, errors.New("No pilot found with this callsign")
-}
-func GetPilotFromId(Cid string) (PilotInfo, error) {
-	// Search the Pilots struct dor the right Cid
-	Json := GetVatsimInfo()
-	for _, Pilot := range Json.Pilots {
-		if fmt.Sprintf("%d", Pilot.Cid) == Cid {
-			return Pilot, nil
-		}
-	}
-	return PilotInfo{}, errors.New("No pilot found with this Cid")
-}
-func GetControllerFromCallsign(Callsign string) (ControllerInfo, error) {
-	// Search the Controllers struct dor the right callsign
-	Json := GetVatsimInfo()
-	for _, Controller := range Json.Controllers {
-		if Controller.Callsign == Callsign {
-			return Controller, nil
-		}
-	}
-	return ControllerInfo{}, errors.New("No Controller found with this callsign")
-}
-func GetControllerFromId(Cid string) (ControllerInfo, error) {
-	// Search the Controllers struct dor the right Cid
-	Json := GetVatsimInfo()
-	for _, Controller := range Json.Controllers {
-		if fmt.Sprintf("%d", Controller.Cid) == Cid {
-			return Controller, nil
-		}
-	}
-	return ControllerInfo{}, errors.New("No Controller found with this Cid")
-}
-func GetAtisFromCallsign(Callsign string) (AtisInfo, error) {
-	Json := GetVatsimInfo()
-	for _, AnAtis := range Json.Atis {
-		if AnAtis.Callsign == Callsign {
-			return AnAtis, nil
-		}
-	}
-	return AtisInfo{}, errors.New("No Atis found with this callsign")
-}
-func GetAtisFromId(Cid string) (AtisInfo, error) {
-	Json := GetVatsimInfo()
-	for _, AnAtis := range Json.Atis {
-		if fmt.Sprintf("%d", AnAtis.Cid) == Cid {
-			return AnAtis, nil
-		}
-	}
-	return AtisInfo{}, errors.New("No Atis found with this Cid")
-}
-func GetServerFromIdent(Ident string) (ServerInfo, error) {
-	Json := GetVatsimInfo()
-	for _, Server := range Json.Servers {
-		if Server.Ident == Ident {
-			return Server, nil
-		}
-	}
-	return ServerInfo{}, errors.New("No Server found with this Cid")
-}
-func GetPrefileFromCallsign(Callsign string) (PrefileInfo, error) {
-	Json := GetVatsimInfo()
-	for _, Prefile := range Json.Prefiles {
-		if Prefile.Callsign == Callsign {
-			return Prefile, nil
-		}
-	}
-	return PrefileInfo{}, errors.New("No Prefile found with this callsign")
-}
-func GetPrefileFromId(Cid string) (PrefileInfo, error) {
-	Json := GetVatsimInfo()
-	for _, Prefile := range Json.Prefiles {
-		if fmt.Sprintf("%d", Prefile.Cid) == Cid {
-			return Prefile, nil
-		}
-	}
-	return PrefileInfo{}, errors.New("No Prefile found with this Cid")
-}
-func GetFacilityFromId(Id string) (FacilityInfo, error) {
-	Json := GetVatsimInfo()
-	for _, Facility := range Json.Facilities {
-		if fmt.Sprintf("%d", Facility.Id) == Id {
-			return Facility, nil
-		}
-	}
-	return FacilityInfo{}, errors.New("No Facility found with this Id")
-}
-func GetFacilityFromShortName(Name string) (FacilityInfo, error) {
-	Json := GetVatsimInfo()
-	for _, Facility := range Json.Facilities {
-		if Facility.ShortName == Name {
-			return Facility, nil
-		}
-	}
-	return FacilityInfo{}, errors.New("No Facility found with this Short Name")
-}
-func GetRatingFromId(Id string) (RatingInfo, error) {
-	Json := GetVatsimInfo()
-	for _, Rating := range Json.Ratings {
-		if fmt.Sprintf("%d", Rating.Id) == Id {
-			return Rating, nil
-		}
-	}
-	return RatingInfo{}, errors.New("No Rating found with this Id")
-}
-func GetRatingFromShortName(Name string) (RatingInfo, error) {
-	Json := GetVatsimInfo()
-	for _, Rating := range Json.Ratings {
-		if Rating.ShortName == Name {
-			return Rating, nil
-		}
-	}
-	return RatingInfo{}, errors.New("No Rating found with this Short Name")
-}
-func GetPilotRatingFromId(Id string) (PilotRatingInfo, error) {
-	Json := GetVatsimInfo()
-	for _, PilotRating := range Json.PilotRatings {
-		if fmt.Sprintf("%d", PilotRating.Id) == Id {
-			return PilotRating, nil
-		}
-	}
-	return PilotRatingInfo{}, errors.New("No PilotRating found with this Id")
-}
-func GetPilotRatingFromShortName(Name string) (PilotRatingInfo, error) {
-	Json := GetVatsimInfo()
-	for _, PilotRating := range Json.PilotRatings {
-		if PilotRating.ShortName == Name {
-			return PilotRating, nil
-		}
-	}
-	return PilotRatingInfo{}, errors.New("No PilotRating found with this Short Name")
-}
-func GetMilitaryRatingFromId(Id string) (MilitaryRatingInfo, error) {
-	Json := GetVatsimInfo()
-	for _, MilitaryRating := range Json.MilitaryRatings {
-		if fmt.Sprintf("%d", MilitaryRating.Id) == Id {
-			return MilitaryRating, nil
-		}
-	}
-	return MilitaryRatingInfo{}, errors.New("No PilotRating found with this Id")
-}
-func GetMilitaryRatingFromShortName(Name string) (MilitaryRatingInfo, error) {
-	Json := GetVatsimInfo()
-	for _, MilitaryRating := range Json.MilitaryRatings {
-		if MilitaryRating.ShortName == Name {
-			return MilitaryRating, nil
-		}
-	}
-	return MilitaryRatingInfo{}, errors.New("No MilitaryRating found with this Short Name")
-}
-
-func GetVatsimInfo() JSONstruct {
-	// Request the Json from the vatsm live Data api
+func fetchAndBuild() {
 	url := getUrl("https://data.vatsim.net/v3/vatsim-data.json", []UrlArgument{})
-
 	response, err := http.Get(url)
 	if err != nil {
-		panic(err)
+		fmt.Println("HTTP error:", err)
+		return
 	}
 	defer response.Body.Close()
 
 	body, err := io.ReadAll(response.Body)
 	if err != nil {
-		panic(err)
+		fmt.Println("Read error:", err)
+		return
 	}
 
-	result := JSONstruct{}
-	json.Unmarshal(body, &result)
-	return result
+	var data JSONstruct
+	if err := json.Unmarshal(body, &data); err != nil {
+		fmt.Println("Unmarshal error:", err)
+		return
+	}
+
+	newPilotByCallsign := make(map[string]PilotInfo, len(data.Pilots))
+	newPilotByCid := make(map[string]PilotInfo, len(data.Pilots))
+	for _, p := range data.Pilots {
+		newPilotByCallsign[p.Callsign] = p
+		newPilotByCid[fmt.Sprintf("%d", p.Cid)] = p
+	}
+
+	newControllerByCallsign := make(map[string]ControllerInfo, len(data.Controllers))
+	newControllerByCid := make(map[string]ControllerInfo, len(data.Controllers))
+	for _, c := range data.Controllers {
+		newControllerByCallsign[c.Callsign] = c
+		newControllerByCid[fmt.Sprintf("%d", c.Cid)] = c
+	}
+
+	newAtisByCallsign := make(map[string]AtisInfo, len(data.Atis))
+	newAtisByCid := make(map[string]AtisInfo, len(data.Atis))
+	for _, a := range data.Atis {
+		newAtisByCallsign[a.Callsign] = a
+		newAtisByCid[fmt.Sprintf("%d", a.Cid)] = a
+	}
+
+	newServerByIdent := make(map[string]ServerInfo, len(data.Servers))
+	for _, s := range data.Servers {
+		newServerByIdent[s.Ident] = s
+	}
+
+	newPrefileByCallsign := make(map[string]PrefileInfo, len(data.Prefiles))
+	newPrefileByCid := make(map[string]PrefileInfo, len(data.Prefiles))
+	for _, p := range data.Prefiles {
+		newPrefileByCallsign[p.Callsign] = p
+		newPrefileByCid[fmt.Sprintf("%d", p.Cid)] = p
+	}
+
+	newFacilityById := make(map[string]FacilityInfo, len(data.Facilities))
+	newFacilityByShortName := make(map[string]FacilityInfo, len(data.Facilities))
+	for _, f := range data.Facilities {
+		newFacilityById[fmt.Sprintf("%d", f.Id)] = f
+		newFacilityByShortName[f.ShortName] = f
+	}
+
+	newRatingById := make(map[string]RatingInfo, len(data.Ratings))
+	newRatingByShortName := make(map[string]RatingInfo, len(data.Ratings))
+	for _, r := range data.Ratings {
+		newRatingById[fmt.Sprintf("%d", r.Id)] = r
+		newRatingByShortName[r.ShortName] = r
+	}
+
+	newPilotRatingById := make(map[string]PilotRatingInfo, len(data.PilotRatings))
+	newPilotRatingByShortName := make(map[string]PilotRatingInfo, len(data.PilotRatings))
+	for _, pr := range data.PilotRatings {
+		newPilotRatingById[fmt.Sprintf("%d", pr.Id)] = pr
+		newPilotRatingByShortName[pr.ShortName] = pr
+	}
+
+	newMilitaryRatingById := make(map[string]MilitaryRatingInfo, len(data.MilitaryRatings))
+	newMilitaryRatingByShortName := make(map[string]MilitaryRatingInfo, len(data.MilitaryRatings))
+	for _, mr := range data.MilitaryRatings {
+		newMilitaryRatingById[fmt.Sprintf("%d", mr.Id)] = mr
+		newMilitaryRatingByShortName[mr.ShortName] = mr
+	}
+
+	// Swap all maps at once under write lock (very fast)
+	mu.Lock()
+	pilotByCallsign = newPilotByCallsign
+	pilotByCid = newPilotByCid
+	controllerByCallsign = newControllerByCallsign
+	controllerByCid = newControllerByCid
+	atisByCallsign = newAtisByCallsign
+	atisByCid = newAtisByCid
+	serverByIdent = newServerByIdent
+	PrefileByCallsign = newPrefileByCallsign
+	prefileByCid = newPrefileByCid
+	facilityById = newFacilityById
+	facilityByShortName = newFacilityByShortName
+	ratingById = newRatingById
+	ratingByShortName = newRatingByShortName
+	pilotRatingById = newPilotRatingById
+	pilotRatingByShortName = newPilotRatingByShortName
+	militaryRatingById = newMilitaryRatingById
+	militaryRatingByShortName = newMilitaryRatingByShortName
+	mu.Unlock()
+}
+
+// Pilots
+func GetPilotFromCallsign(Callsign string) (PilotInfo, error) {
+	mu.RLock()
+	defer mu.RUnlock()
+	if p, ok := pilotByCallsign[Callsign]; ok {
+		return p, nil
+	}
+	return PilotInfo{}, errors.New("No pilot found with this callsign")
+}
+
+func GetPilotFromId(Cid string) (PilotInfo, error) {
+	mu.RLock()
+	defer mu.RUnlock()
+	if p, ok := pilotByCid[Cid]; ok {
+		return p, nil
+	}
+	return PilotInfo{}, errors.New("No pilot found with this Cid")
+}
+
+// Controllers
+func GetControllerFromCallsign(Callsign string) (ControllerInfo, error) {
+	mu.RLock()
+	defer mu.RUnlock()
+	if c, ok := controllerByCallsign[Callsign]; ok {
+		return c, nil
+	}
+	return ControllerInfo{}, errors.New("No Controller found with this callsign")
+}
+
+func GetControllerFromId(Cid string) (ControllerInfo, error) {
+	mu.RLock()
+	defer mu.RUnlock()
+	if c, ok := controllerByCid[Cid]; ok {
+		return c, nil
+	}
+	return ControllerInfo{}, errors.New("No Controller found with this Cid")
+}
+
+// Atis
+func GetAtisFromCallsign(Callsign string) (AtisInfo, error) {
+	mu.RLock()
+	defer mu.RUnlock()
+	if a, ok := atisByCallsign[Callsign]; ok {
+		return a, nil
+	}
+	return AtisInfo{}, errors.New("No Atis found with this callsign")
+}
+
+func GetAtisFromId(Cid string) (AtisInfo, error) {
+	mu.RLock()
+	defer mu.RUnlock()
+	if a, ok := atisByCid[Cid]; ok {
+		return a, nil
+	}
+	return AtisInfo{}, errors.New("No Atis found with this Cid")
+}
+
+// Servers
+func GetServerFromIdent(Ident string) (ServerInfo, error) {
+	mu.RLock()
+	defer mu.RUnlock()
+	if s, ok := serverByIdent[Ident]; ok {
+		return s, nil
+	}
+	return ServerInfo{}, errors.New("No Server found with this Ident")
+}
+
+// Prefiles
+func GetPrefileFromCallsign(Callsign string) (PrefileInfo, error) {
+	mu.RLock()
+	defer mu.RUnlock()
+	if p, ok := PrefileByCallsign[Callsign]; ok {
+		return p, nil
+	}
+	return PrefileInfo{}, errors.New("No Prefile found with this callsign")
+}
+
+func GetPrefileFromId(Cid string) (PrefileInfo, error) {
+	mu.RLock()
+	defer mu.RUnlock()
+	if p, ok := prefileByCid[Cid]; ok {
+		return p, nil
+	}
+	return PrefileInfo{}, errors.New("No Prefile found with this Cid")
+}
+
+// Facilities
+func GetFacilityFromId(Id string) (FacilityInfo, error) {
+	mu.RLock()
+	defer mu.RUnlock()
+	if f, ok := facilityById[Id]; ok {
+		return f, nil
+	}
+	return FacilityInfo{}, errors.New("No Facility found with this Id")
+}
+
+func GetFacilityFromShortName(Name string) (FacilityInfo, error) {
+	mu.RLock()
+	defer mu.RUnlock()
+	if f, ok := facilityByShortName[Name]; ok {
+		return f, nil
+	}
+	return FacilityInfo{}, errors.New("No Facility found with this Short Name")
+}
+
+// Ratings
+func GetRatingFromId(Id string) (RatingInfo, error) {
+	mu.RLock()
+	defer mu.RUnlock()
+	if r, ok := ratingById[Id]; ok {
+		return r, nil
+	}
+	return RatingInfo{}, errors.New("No Rating found with this Id")
+}
+
+func GetRatingFromShortName(Name string) (RatingInfo, error) {
+	mu.RLock()
+	defer mu.RUnlock()
+	if r, ok := ratingByShortName[Name]; ok {
+		return r, nil
+	}
+	return RatingInfo{}, errors.New("No Rating found with this Short Name")
+}
+
+// PilotRatings
+func GetPilotRatingFromId(Id string) (PilotRatingInfo, error) {
+	mu.RLock()
+	defer mu.RUnlock()
+	if pr, ok := pilotRatingById[Id]; ok {
+		return pr, nil
+	}
+	return PilotRatingInfo{}, errors.New("No PilotRating found with this Id")
+}
+
+func GetPilotRatingFromShortName(Name string) (PilotRatingInfo, error) {
+	mu.RLock()
+	defer mu.RUnlock()
+	if pr, ok := pilotRatingByShortName[Name]; ok {
+		return pr, nil
+	}
+	return PilotRatingInfo{}, errors.New("No PilotRating found with this Short Name")
+}
+
+// MilitaryRatings
+func GetMilitaryRatingFromId(Id string) (MilitaryRatingInfo, error) {
+	mu.RLock()
+	defer mu.RUnlock()
+	if mr, ok := militaryRatingById[Id]; ok {
+		return mr, nil
+	}
+	return MilitaryRatingInfo{}, errors.New("No MilitaryRating found with this Id")
+}
+
+func GetMilitaryRatingFromShortName(Name string) (MilitaryRatingInfo, error) {
+	mu.RLock()
+	defer mu.RUnlock()
+	if mr, ok := militaryRatingByShortName[Name]; ok {
+		return mr, nil
+	}
+	return MilitaryRatingInfo{}, errors.New("No MilitaryRating found with this Short Name")
 }
