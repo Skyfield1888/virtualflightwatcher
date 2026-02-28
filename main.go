@@ -6,10 +6,9 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/Skyfield1888/Vatsim/commands"
-
+	"github.com/Skyfield1888/virtualflightwatcher/api/vatsim"
+	"github.com/Skyfield1888/virtualflightwatcher/commands"
 	"github.com/bwmarrin/discordgo"
-
 	_ "github.com/joho/godotenv/autoload"
 )
 
@@ -32,7 +31,6 @@ func main() {
 		}
 	})
 
-	// Enregistrer les commandes auprès de Discord
 	for _, cmd := range commands.Commands {
 		discord.ApplicationCommandCreate(discord.State.User.ID, "", cmd)
 		// _, err := discord.ApplicationCommandCreate(discord.State.User.ID, "1407389812687769712", cmd)
@@ -41,6 +39,8 @@ func main() {
 		// }
 	}
 
+	vatsim.StartVatsimApi()
+
 	defer discord.Close()
 
 	fmt.Println("Bot is running. Press CTRL+C to exit.")
@@ -48,4 +48,5 @@ func main() {
 	sc := make(chan os.Signal, 1)
 	signal.Notify(sc, syscall.SIGINT, syscall.SIGTERM)
 	<-sc
+
 }
