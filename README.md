@@ -50,7 +50,7 @@ cd Vatsim
 
 ### Configuration
 
-Add in the `.env` file at the root of the project:
+Create the `.env` file at the root of the project:
 
 ```env
 DISCORD_TOKEN=your_discord_bot_token_here
