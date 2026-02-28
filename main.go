@@ -6,8 +6,9 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/Skyfield1888/virtualflightwatcher/api/ivao"
 	"github.com/Skyfield1888/virtualflightwatcher/api/vatsim"
-	"github.com/Skyfield1888/virtualflightwatcher/commands"
+	"github.com/Skyfield1888/virtualflightwatcher/discord_utils/commands"
 	"github.com/bwmarrin/discordgo"
 	_ "github.com/joho/godotenv/autoload"
 )
@@ -40,6 +41,7 @@ func main() {
 	}
 
 	vatsim.StartVatsimApi()
+	ivao.StartIvaoApi()
 
 	defer discord.Close()
 
