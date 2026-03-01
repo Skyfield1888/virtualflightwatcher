@@ -23,11 +23,11 @@ IVAO compatibility is expected, but not in the near future
 | `/pilot` | Get live pilot info | `network`, `cid_or_callsign` |
 | `/controller` | Get live controller info | `network`, `cid_or_callsign` |
 | `/atis` | Get the ATIS of a station | `network`, `cid_or_callsign` |
-| `/prefile` | Get a filed flight plan | `network`, `cid_or_callsign` |
+| `/prefile` | Get a VATSIM prefiled flight plan | `network`, `cid_or_callsign` |
 | `/facility` | Get a VATSIM facility | `id_or_name` (e.g. `5` or `APP`) |
-| `/rating` | Get an ATC rating | `id_or_name` (e.g. `3` or `S2`) |
-| `/pilotrating` | Get a pilot rating | `id_or_name` |
-| `/militaryrating` | Get a military rating | `id_or_name` |
+| `/rating` | Get a VATSIM ATC rating | `id_or_name` (e.g. `3` or `S2`) |
+| `/pilotrating` | Get a VATSIM pilot rating | `id_or_name` |
+| `/militaryrating` | Get a VATSIM military rating | `id_or_name` |
 
 > **Tip:** For `/atis`, you don't need to include `_ATIS` — just type the station name (e.g. `LFPG` or `LFPG_APP`) and the bot handles it automatically.
 
@@ -72,11 +72,16 @@ go run main.go
 Vatsim/
 ├── main.go                  
 ├── api/
+│   ├── ivao/
+│   │   └── ivao_api.go
 │   └── vatsim/
-│       └── vatsim.go        
-├── commands/
-│   └── commands.go          
-├── .env                     
+│       └── vatsim_api.go        
+├── discord_utils/
+│   ├── commands/
+│   │   └──  commands.go
+│   └── events/
+│       └── events.go
+├── go.sum                           
 └── go.mod
 ```
 
@@ -84,7 +89,9 @@ Vatsim/
 
 ## How It Works
 
-On startup, the bot fetches the full VATSIM data feed (`https://data.vatsim.net/v3/vatsim-data.json`) and indexes every pilot, controller, ATIS, prefile, facility, and rating into in-memory hash maps. A background goroutine refreshes the data every 15 seconds. All Discord command lookups are instant O(1) map reads — no API call is made per command.
+On startup, the bot fetches the full VATSIM data feed (`https://data.vatsim.net/v3/vatsim-data.json`) and Ivao public data feed (`https://api.ivao.aero/v2/tracker/whazzup`) and indexes every pilot, controller, ATIS, prefile*, facility*, and rating into in-memory hash maps. A background goroutine refreshes the data every 15 seconds. All Discord command lookups are instant O(1) map reads — no API call is made per command.
+
+"*" : Vatsim only
 
 ---
 
@@ -99,7 +106,7 @@ On startup, the bot fetches the full VATSIM data feed (`https://data.vatsim.net/
 
 ## Roadmap
 
-- [ ] IVAO network support
+- [x] IVAO network support
 - [ ] Flight tracking / route map
 - [ ] Event notifications
 - [ ] Prefile Notifications on new Prefiles for a set Facility for controlers

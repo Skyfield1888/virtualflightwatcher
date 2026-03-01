@@ -34,10 +34,6 @@ func main() {
 
 	for _, cmd := range commands.Commands {
 		discord.ApplicationCommandCreate(discord.State.User.ID, "", cmd)
-		// _, err := discord.ApplicationCommandCreate(discord.State.User.ID, "1407389812687769712", cmd)
-		// if err != nil {
-		// 	fmt.Println("Erreur enregistrement commande:", err) // log l'erreur !
-		// }
 	}
 
 	vatsim.StartVatsimApi()

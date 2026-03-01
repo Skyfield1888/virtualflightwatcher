@@ -134,7 +134,7 @@ func getOptions(i *discordgo.InteractionCreate) map[string]*discordgo.Applicatio
 	return optionMap
 }
 
-func vatsimPpilotEmbed(info vatsim.PilotInfo) *discordgo.MessageEmbed {
+func vatsimPilotEmbed(info vatsim.PilotInfo) *discordgo.MessageEmbed {
 	return &discordgo.MessageEmbed{
 		Title:       info.Callsign + "  •  " + info.FlightPlan.Departure + " → " + info.FlightPlan.Arrival + "  •  VATSIM",
 		Description: fmt.Sprintf("**%s** | %s | CID: `%d`", info.Name, info.FlightPlan.AircraftShort, info.Cid),
@@ -151,6 +151,53 @@ func vatsimPpilotEmbed(info vatsim.PilotInfo) *discordgo.MessageEmbed {
 		},
 		Footer: &discordgo.MessageEmbedFooter{
 			Text: "VATSIM  •  Connecté depuis " + info.LogonTime + "  •  Mis à jour " + info.LastUpdated,
+		},
+	}
+}
+
+func ivaoPilotEmbed(info ivao.PilotInfo) *discordgo.MessageEmbed {
+	dep, arr := "N/A", "N/A"
+	route, remarks, aircraft, aircraftFaa := "N/A", "N/A", "N/A", "N/A"
+	flightRules, alternate, deptime, enroute, fuel := "N/A", "N/A", "N/A", "N/A", "N/A"
+	if info.FlightPlan != nil {
+		fp := info.FlightPlan
+		dep = fp.DepartureId
+		arr = fp.ArrivalId
+		route = fp.Route
+		remarks = fp.Remarks
+		aircraft = fp.AircraftId
+		aircraftFaa = fp.AircraftId
+		flightRules = formatFlightRules(fp.FlightRules)
+		alternate = fp.AlternativeId
+		if alternate == "" {
+			alternate = "N/A"
+		}
+		if fp.DepartureTime > 0 {
+			deptime = formatDuration(fmt.Sprintf("%04d", fp.DepartureTime))
+		}
+		if fp.Eet > 0 {
+			enroute = fmt.Sprintf("%02dh %02dm", fp.Eet/60, fp.Eet%60)
+		}
+		if fp.Endurance > 0 {
+			fuel = fmt.Sprintf("%02dh %02dm", fp.Endurance/60, fp.Endurance%60)
+		}
+	}
+	return &discordgo.MessageEmbed{
+		Title:       info.Callsign + "  •  " + dep + " → " + arr + "  •  IVAO",
+		Description: fmt.Sprintf("**%s %s** | %s | ID: `%d`", info.User.FirstName, info.User.LastName, aircraft, info.UserId),
+		Color:       0x5865F2,
+		Fields: []*discordgo.MessageEmbedField{
+			{Name: "Route", Value: fmt.Sprintf("```%s```", route), Inline: false},
+			{Name: "Position", Value: fmt.Sprintf("**Lat:** %.4f °\n**Lon:** %.4f °", info.LastTrack.Latitude, info.LastTrack.Longitude), Inline: true},
+			{Name: "État", Value: fmt.Sprintf("**Alt:** %d ft\n**GS:** %d kts\n**HDG:** %d°\n**État:** %s", info.LastTrack.Altitude, info.LastTrack.Groundspeed, info.LastTrack.Heading, info.LastTrack.State), Inline: true},
+			{Name: "Météo", Value: fmt.Sprintf("**QNH:** N/A\n**Squawk:** %d", info.LastTrack.Transponder), Inline: true},
+			{Name: "Plan de vol", Value: fmt.Sprintf("**Règles:** %s\n**Départ:** %s\n**Arrivée:** %s\n**Alternate:** %s", flightRules, dep, arr, alternate), Inline: true},
+			{Name: "Timing", Value: fmt.Sprintf("**Départ prévu:** %s\n**En route:** %s\n**Carburant:** %s", deptime, enroute, fuel), Inline: true},
+			{Name: "Technique", Value: fmt.Sprintf("**Avion (FAA):** %s\n**Au sol:** %t\n**Serveur:** %s", aircraftFaa, info.LastTrack.OnGround, info.ServerId), Inline: true},
+			{Name: "Remarques", Value: fmt.Sprintf("```%s```", remarks), Inline: false},
+		},
+		Footer: &discordgo.MessageEmbedFooter{
+			Text: "IVAO  •  Connecté depuis " + info.CreatedAt,
 		},
 	}
 }
@@ -185,6 +232,31 @@ func vatsimAtisEmbed(info vatsim.AtisInfo) *discordgo.MessageEmbed {
 		},
 		Footer: &discordgo.MessageEmbedFooter{
 			Text: "VATSIM  •  Connecté depuis " + info.LogonTime + "  •  Mis à jour " + info.LastUpdated,
+		},
+	}
+}
+
+func ivaoControllerAndAtisEmbed(info ivao.AtcInfo) *discordgo.MessageEmbed {
+	atisText := "N/A"
+	atisTitle := "ATIS"
+	if info.Atis != nil && len(info.Atis.Lines) > 0 {
+		atisText = strings.Join(info.Atis.Lines, "\n")
+		if info.Atis.Revision != "" {
+			atisTitle = "ATIS " + info.Atis.Revision
+		}
+	}
+	return &discordgo.MessageEmbed{
+		Title:       info.Callsign + "  •  " + info.AtcSession.Position + "  •  IVAO",
+		Description: fmt.Sprintf("**%s %s** | ID: `%d` | %s", info.User.FirstName, info.User.LastName, info.UserId, info.User.Rating.AtcRating.ShortName),
+		Color:       0x57F287,
+		Fields: []*discordgo.MessageEmbedField{
+			{Name: atisTitle, Value: fmt.Sprintf("```%s```", atisText), Inline: false},
+			{Name: "Fréquence", Value: fmt.Sprintf("%.3f MHz", info.AtcSession.Frequency), Inline: true},
+			{Name: "Portée visuelle", Value: "N/A", Inline: true},
+			{Name: "Serveur", Value: info.ServerId, Inline: true},
+		},
+		Footer: &discordgo.MessageEmbedFooter{
+			Text: "IVAO  •  Connecté depuis " + info.CreatedAt,
 		},
 	}
 }
@@ -267,57 +339,6 @@ func vatsimMilitaryRatingEmbed(info vatsim.MilitaryRatingInfo) *discordgo.Messag
 	}
 }
 
-func ivaoPilotEmbed(info ivao.PilotInfo) *discordgo.MessageEmbed {
-	dep, arr := "N/A", "N/A"
-	route, remarks, aircraft, flightRules := "N/A", "N/A", "N/A", "N/A"
-	if info.FlightPlan != nil {
-		dep = info.FlightPlan.DepartureId
-		arr = info.FlightPlan.ArrivalId
-		route = info.FlightPlan.Route
-		remarks = info.FlightPlan.Remarks
-		aircraft = info.FlightPlan.AircraftId
-		flightRules = formatFlightRules(info.FlightPlan.FlightRules)
-	}
-	return &discordgo.MessageEmbed{
-		Title:       info.Callsign + "  •  " + dep + " → " + arr + "  •  IVAO",
-		Description: fmt.Sprintf("**%s %s** | %s | ID: `%d`", info.User.FirstName, info.User.LastName, aircraft, info.UserId),
-		Color:       0x5865F2,
-		Fields: []*discordgo.MessageEmbedField{
-			{Name: "Route", Value: fmt.Sprintf("```%s```", route), Inline: false},
-			{Name: "Position", Value: fmt.Sprintf("**Lat:** %.4f °\n**Lon:** %.4f °", info.LastTrack.Latitude, info.LastTrack.Longitude), Inline: true},
-			{Name: "État", Value: fmt.Sprintf("**Alt:** %d ft\n**GS:** %d kts\n**HDG:** %d°\n**État:** %s", info.LastTrack.Altitude, info.LastTrack.Groundspeed, info.LastTrack.Heading, info.LastTrack.State), Inline: true},
-			{Name: "Technique", Value: fmt.Sprintf("**Squawk:** %d\n**Au sol:** %t\n**Règles:** %s", info.LastTrack.Transponder, info.LastTrack.OnGround, flightRules), Inline: true},
-			{Name: "Remarques", Value: fmt.Sprintf("```%s```", remarks), Inline: false},
-		},
-		Footer: &discordgo.MessageEmbedFooter{
-			Text: "IVAO  •  Connecté depuis " + info.CreatedAt,
-		},
-	}
-}
-
-func ivaoControllerAndAtisEmbed(info ivao.AtcInfo) *discordgo.MessageEmbed {
-	atisText := "N/A"
-	atisRevision := ""
-	if info.Atis != nil && len(info.Atis.Lines) > 0 {
-		atisText = strings.Join(info.Atis.Lines, "\n")
-		atisRevision = " " + info.Atis.Revision
-	}
-	return &discordgo.MessageEmbed{
-		Title:       info.Callsign + "  •  " + info.AtcSession.Position + "  •  IVAO",
-		Description: fmt.Sprintf("**%s %s** | ID: `%d` | %s", info.User.FirstName, info.User.LastName, info.UserId, info.User.Rating.AtcRating.ShortName),
-		Color:       0x57F287,
-		Fields: []*discordgo.MessageEmbedField{
-			{Name: "ATIS" + atisRevision, Value: fmt.Sprintf("```%s```", atisText), Inline: false},
-			{Name: "Fréquence", Value: fmt.Sprintf("%.3f MHz", info.AtcSession.Frequency), Inline: true},
-			{Name: "Position", Value: fmt.Sprintf("**Lat:** %.4f °\n**Lon:** %.4f °", info.LastTrack.Latitude, info.LastTrack.Longitude), Inline: true},
-			{Name: "Serveur", Value: info.ServerId, Inline: true},
-		},
-		Footer: &discordgo.MessageEmbedFooter{
-			Text: "IVAO  •  Connecté depuis " + info.CreatedAt,
-		},
-	}
-}
-
 func networkAndIdentOptions(entity string) []*discordgo.ApplicationCommandOption {
 	return []*discordgo.ApplicationCommandOption{
 		{
@@ -395,7 +416,7 @@ var CommandHandlers = map[string]func(session *discordgo.Session, interaction *d
 			respondError(session, interaction, err.Error())
 			return
 		}
-		respond(session, interaction, vatsimPpilotEmbed(info))
+		respond(session, interaction, vatsimPilotEmbed(info))
 	},
 
 	"controller": func(session *discordgo.Session, interaction *discordgo.InteractionCreate) {
@@ -439,6 +460,7 @@ var CommandHandlers = map[string]func(session *discordgo.Session, interaction *d
 		cidOrCallsign := opts["cid_or_callsign"].StringValue()
 
 		if opts["network"].StringValue() == "IVAO" {
+			// TODO : On IVAO ATC and ATIS are the same, but it will be great to just put the position name like LFBP insted of LFBP_TWR or LFBP_GND...
 			info, err := ivao.GetAtcFromCallsign(strings.ToUpper(cidOrCallsign))
 			if err != nil {
 				fmt.Println(err)
