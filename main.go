@@ -42,7 +42,6 @@ func main() {
 
 	vatsim.StartVatsimApi()
 	ivao.StartIvaoApi()
-
 	defer discord.Close()
 
 	fmt.Println("Bot is running. Press CTRL+C to exit.")

@@ -11,45 +11,86 @@ import (
 )
 
 type JSONstruct struct {
-	UpdatedAt    string            `json:"updatedAt"`
-	Servers      []ServerInfo      `json:"servers"`
-	VoiceServers []VoiceServerInfo `json:"voiceServers"`
-	Connections  Connections       `json:"connections"`
+	UpdatedAt    string       `json:"updatedAt"`
+	Clients      Clients      `json:"clients"`
+	Servers      []ServerInfo `json:"servers"`
+	VoiceServers []ServerInfo `json:"voiceServers"`
+	Connections  NetworkStats `json:"connections"`
 }
 
-type Connections struct {
+type Clients struct {
 	Pilots    []PilotInfo    `json:"pilots"`
 	Atcs      []AtcInfo      `json:"atcs"`
 	Observers []ObserverInfo `json:"observers"`
-	FollowMe  []FollowMeInfo `json:"-"`
+	FollowMe  FlexFollowMe   `json:"followMe"`
+}
+
+type NetworkStats struct {
+	Total          int `json:"total"`
+	Supervisor     int `json:"supervisor"`
+	Atc            int `json:"atc"`
+	Observer       int `json:"observer"`
+	Pilot          int `json:"pilot"`
+	WorldTour      int `json:"worldTour"`
+	FollowMe       int `json:"followMe"`
+	UniqueUsers24h int `json:"uniqueUsers24h"`
 }
 
 type ServerInfo struct {
-	Id               string `json:"id"`
-	Hostname         string `json:"hostname"`
-	Ip               string `json:"ip"`
-	Description      string `json:"description"`
-	ConnectedClients int    `json:"connectedClients"`
+	Id                 string `json:"id"`
+	Hostname           string `json:"hostname"`
+	Ip                 string `json:"ip"`
+	Description        string `json:"description"`
+	CountryId          string `json:"countryId"`
+	CurrentConnections int    `json:"currentConnections"`
+	MaximumConnections int    `json:"maximumConnections"`
 }
 
-type VoiceServerInfo struct {
-	Id          string `json:"id"`
-	Hostname    string `json:"hostname"`
-	Ip          string `json:"ip"`
+type UserRating struct {
+	Id          int    `json:"id"`
+	Name        string `json:"name"`
+	ShortName   string `json:"shortName"`
 	Description string `json:"description"`
 }
 
+type UserRatings struct {
+	IsAtc         bool       `json:"isAtc"`
+	IsPilot       bool       `json:"isPilot"`
+	PilotRating   UserRating `json:"pilotRating"`
+	AtcRating     UserRating `json:"atcRating"`
+	NetworkRating UserRating `json:"networkRating"`
+}
+
+type User struct {
+	Id         int         `json:"id"`
+	FirstName  string      `json:"firstName"`
+	LastName   string      `json:"lastName"`
+	DivisionId string      `json:"divisionId"`
+	Rating     UserRatings `json:"rating"`
+}
+
+type BaseClient struct {
+	Id              int    `json:"id"`
+	Callsign        string `json:"callsign"`
+	UserId          int    `json:"userId"`
+	ConnectionType  string `json:"connectionType"`
+	ServerId        string `json:"serverId"`
+	Time            int    `json:"time"`
+	SoftwareTypeId  string `json:"softwareTypeId"`
+	SoftwareVersion string `json:"softwareVersion"`
+	Sandbagging     bool   `json:"sandbagging"`
+	IsMilitary      bool   `json:"isMilitary"`
+	IsWorldTour     bool   `json:"isWorldTour"`
+	CreatedAt       string `json:"createdAt"`
+	CompletedAt     string `json:"completedAt"`
+	UpdatedAt       string `json:"updatedAt"`
+	User            User   `json:"user"`
+}
+
 type PilotInfo struct {
-	Id              int         `json:"id"`
-	UserId          int         `json:"userId"`
-	Callsign        string      `json:"callsign"`
-	ServerId        string      `json:"serverId"`
-	SoftwareTypeId  string      `json:"softwareTypeId"`
-	SoftwareVersion string      `json:"softwareVersion"`
-	Rating          int         `json:"rating"`
-	CreatedAt       string      `json:"createdAt"`
-	LastTrack       PilotTrack  `json:"lastTrack"`
-	FlightPlan      *FlightPlan `json:"flightPlan"`
+	BaseClient
+	LastTrack  PilotTrack  `json:"lastTrack"`
+	FlightPlan *FlightPlan `json:"flightPlan"`
 }
 
 type PilotTrack struct {
@@ -64,7 +105,7 @@ type PilotTrack struct {
 	OnGround           bool    `json:"onGround"`
 	State              string  `json:"state"`
 	Timestamp          string  `json:"timestamp"`
-	Transponder        string  `json:"transponder"`
+	Transponder        int     `json:"transponder"`
 	TransponderMode    string  `json:"transponderMode"`
 }
 
@@ -76,36 +117,40 @@ type FlightPlan struct {
 	DepartureId    string `json:"departureId"`
 	ArrivalId      string `json:"arrivalId"`
 	AlternativeId  string `json:"alternativeId"`
-	AltAltId       string `json:"altAltId"`
+	Alternative2Id string `json:"alternative2Id"`
 	DepartureTime  int    `json:"departureTime"`
 	Eet            int    `json:"eet"`
 	Endurance      int    `json:"endurance"`
-	CruisingSpeed  string `json:"cruisingSpeed"`
-	CruisingLevel  string `json:"cruisingLevel"`
+	Speed          string `json:"speed"`
+	Level          string `json:"level"`
 	FlightRules    string `json:"flightRules"`
 	FlightType     string `json:"flightType"`
 	Route          string `json:"route"`
 	Remarks        string `json:"remarks"`
+	PeopleOnBoard  int    `json:"peopleOnBoard"`
 }
 
 type AtcInfo struct {
-	Id              int        `json:"id"`
-	UserId          int        `json:"userId"`
-	Callsign        string     `json:"callsign"`
-	ServerId        string     `json:"serverId"`
-	SoftwareTypeId  string     `json:"softwareTypeId"`
-	SoftwareVersion string     `json:"softwareVersion"`
-	Rating          int        `json:"rating"`
-	CreatedAt       string     `json:"createdAt"`
-	LastTrack       AtcTrack   `json:"lastTrack"`
-	AtcSession      AtcSession `json:"atcSession"`
-	Atis            *AtisInfo  `json:"atis"`
+	BaseClient
+	LastTrack  AtcTrack   `json:"lastTrack"`
+	AtcSession AtcSession `json:"atcSession"`
+	Atis       *AtisInfo  `json:"atis"`
 }
 
 type AtcTrack struct {
-	Latitude  float64 `json:"latitude"`
-	Longitude float64 `json:"longitude"`
-	Timestamp string  `json:"timestamp"`
+	Altitude           int     `json:"altitude"`
+	AltitudeDifference int     `json:"altitudeDifference"`
+	ArrivalDistance    float64 `json:"arrivalDistance"`
+	DepartureDistance  float64 `json:"departureDistance"`
+	Groundspeed        int     `json:"groundspeed"`
+	Heading            int     `json:"heading"`
+	Latitude           float64 `json:"latitude"`
+	Longitude          float64 `json:"longitude"`
+	OnGround           bool    `json:"onGround"`
+	State              string  `json:"state"`
+	Timestamp          string  `json:"timestamp"`
+	Transponder        int     `json:"transponder"`
+	TransponderMode    string  `json:"transponderMode"`
 }
 
 type AtcSession struct {
@@ -120,31 +165,27 @@ type AtisInfo struct {
 }
 
 type ObserverInfo struct {
-	Id              int    `json:"id"`
-	UserId          int    `json:"userId"`
-	Callsign        string `json:"callsign"`
-	ServerId        string `json:"serverId"`
-	SoftwareTypeId  string `json:"softwareTypeId"`
-	SoftwareVersion string `json:"softwareVersion"`
-	Rating          int    `json:"rating"`
-	CreatedAt       string `json:"createdAt"`
+	BaseClient
+	AtcSession AtcSession `json:"atcSession"`
 }
 
 type FollowMeInfo struct {
-	Id              int    `json:"id"`
-	UserId          int    `json:"userId"`
-	Callsign        string `json:"callsign"`
-	ServerId        string `json:"serverId"`
-	SoftwareTypeId  string `json:"softwareTypeId"`
-	SoftwareVersion string `json:"softwareVersion"`
-	Rating          int    `json:"rating"`
-	CreatedAt       string `json:"createdAt"`
+	BaseClient
+}
+
+type FlexFollowMe []FollowMeInfo
+
+func (f *FlexFollowMe) UnmarshalJSON(data []byte) error {
+	if len(data) > 0 && data[0] != '[' {
+		return nil
+	}
+	return json.Unmarshal(data, (*[]FollowMeInfo)(f))
 }
 
 var (
 	mu sync.RWMutex
 
-	pilotByCallsign map[string]PilotInfo
+	PilotByCallsign map[string]PilotInfo
 	pilotByUserId   map[string]PilotInfo
 
 	atcByCallsign map[string]AtcInfo
@@ -154,7 +195,7 @@ var (
 	followMeByCallsign map[string]FollowMeInfo
 
 	serverById      map[string]ServerInfo
-	voiceServerById map[string]VoiceServerInfo
+	voiceServerById map[string]ServerInfo
 )
 
 func StartIvaoApi() {
@@ -190,27 +231,27 @@ func fetchAndBuild() {
 		return
 	}
 
-	newPilotByCallsign := make(map[string]PilotInfo, len(data.Connections.Pilots))
-	newPilotByUserId := make(map[string]PilotInfo, len(data.Connections.Pilots))
-	for _, p := range data.Connections.Pilots {
+	newPilotByCallsign := make(map[string]PilotInfo, len(data.Clients.Pilots))
+	newPilotByUserId := make(map[string]PilotInfo, len(data.Clients.Pilots))
+	for _, p := range data.Clients.Pilots {
 		newPilotByCallsign[p.Callsign] = p
 		newPilotByUserId[fmt.Sprintf("%d", p.UserId)] = p
 	}
 
-	newAtcByCallsign := make(map[string]AtcInfo, len(data.Connections.Atcs))
-	newAtcByUserId := make(map[string]AtcInfo, len(data.Connections.Atcs))
-	for _, a := range data.Connections.Atcs {
+	newAtcByCallsign := make(map[string]AtcInfo, len(data.Clients.Atcs))
+	newAtcByUserId := make(map[string]AtcInfo, len(data.Clients.Atcs))
+	for _, a := range data.Clients.Atcs {
 		newAtcByCallsign[a.Callsign] = a
 		newAtcByUserId[fmt.Sprintf("%d", a.UserId)] = a
 	}
 
-	newObserverByCallsign := make(map[string]ObserverInfo, len(data.Connections.Observers))
-	for _, o := range data.Connections.Observers {
+	newObserverByCallsign := make(map[string]ObserverInfo, len(data.Clients.Observers))
+	for _, o := range data.Clients.Observers {
 		newObserverByCallsign[o.Callsign] = o
 	}
 
-	newFollowMeByCallsign := make(map[string]FollowMeInfo, len(data.Connections.FollowMe))
-	for _, f := range data.Connections.FollowMe {
+	newFollowMeByCallsign := make(map[string]FollowMeInfo, len(data.Clients.FollowMe))
+	for _, f := range data.Clients.FollowMe {
 		newFollowMeByCallsign[f.Callsign] = f
 	}
 
@@ -219,13 +260,13 @@ func fetchAndBuild() {
 		newServerById[s.Id] = s
 	}
 
-	newVoiceServerById := make(map[string]VoiceServerInfo, len(data.VoiceServers))
+	newVoiceServerById := make(map[string]ServerInfo, len(data.VoiceServers))
 	for _, v := range data.VoiceServers {
 		newVoiceServerById[v.Id] = v
 	}
 
 	mu.Lock()
-	pilotByCallsign = newPilotByCallsign
+	PilotByCallsign = newPilotByCallsign
 	pilotByUserId = newPilotByUserId
 	atcByCallsign = newAtcByCallsign
 	atcByUserId = newAtcByUserId
@@ -236,11 +277,10 @@ func fetchAndBuild() {
 	mu.Unlock()
 }
 
-// Pilots
 func GetPilotFromCallsign(callsign string) (PilotInfo, error) {
 	mu.RLock()
 	defer mu.RUnlock()
-	if p, ok := pilotByCallsign[callsign]; ok {
+	if p, ok := PilotByCallsign[callsign]; ok {
 		return p, nil
 	}
 	return PilotInfo{}, errors.New("no pilot found with this callsign")
@@ -255,7 +295,6 @@ func GetPilotFromUserId(userId string) (PilotInfo, error) {
 	return PilotInfo{}, errors.New("no pilot found with this userId")
 }
 
-// ATC
 func GetAtcFromCallsign(callsign string) (AtcInfo, error) {
 	mu.RLock()
 	defer mu.RUnlock()
@@ -274,7 +313,6 @@ func GetAtcFromUserId(userId string) (AtcInfo, error) {
 	return AtcInfo{}, errors.New("no ATC found with this userId")
 }
 
-// Observers
 func GetObserverFromCallsign(callsign string) (ObserverInfo, error) {
 	mu.RLock()
 	defer mu.RUnlock()
@@ -284,7 +322,6 @@ func GetObserverFromCallsign(callsign string) (ObserverInfo, error) {
 	return ObserverInfo{}, errors.New("no observer found with this callsign")
 }
 
-// FollowMe vehicles
 func GetFollowMeFromCallsign(callsign string) (FollowMeInfo, error) {
 	mu.RLock()
 	defer mu.RUnlock()
@@ -293,8 +330,6 @@ func GetFollowMeFromCallsign(callsign string) (FollowMeInfo, error) {
 	}
 	return FollowMeInfo{}, errors.New("no follow-me vehicle found with this callsign")
 }
-
-// Servers
 
 func GetServerFromId(id string) (ServerInfo, error) {
 	mu.RLock()
@@ -305,11 +340,11 @@ func GetServerFromId(id string) (ServerInfo, error) {
 	return ServerInfo{}, errors.New("no server found with this id")
 }
 
-func GetVoiceServerFromId(id string) (VoiceServerInfo, error) {
+func GetVoiceServerFromId(id string) (ServerInfo, error) {
 	mu.RLock()
 	defer mu.RUnlock()
 	if v, ok := voiceServerById[id]; ok {
 		return v, nil
 	}
-	return VoiceServerInfo{}, errors.New("no voice server found with this id")
+	return ServerInfo{}, errors.New("no voice server found with this id")
 }
