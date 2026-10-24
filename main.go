@@ -6,6 +6,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/Skyfield1888/virtualflightwatcher/api/geo"
 	"github.com/Skyfield1888/virtualflightwatcher/api/ivao"
 	"github.com/Skyfield1888/virtualflightwatcher/api/vatsim"
 	"github.com/Skyfield1888/virtualflightwatcher/discord_utils/commands"
@@ -25,6 +26,12 @@ func main() {
 		fmt.Println("Error opening connection:", err)
 		return
 	}
+
+	go func() {
+		if err := geo.LoadNavdata("navdata"); err != nil {
+			fmt.Println("Navdata load error:", err)
+		}
+	}()
 
 	discord.AddHandler(func(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		if h, ok := commands.CommandHandlers[i.ApplicationCommandData().Name]; ok {

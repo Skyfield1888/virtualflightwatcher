@@ -107,6 +107,7 @@ On startup, the bot fetches the full VATSIM data feed (`https://data.vatsim.net/
 ## Roadmap
 
 - [x] IVAO network support
-- [ ] Flight tracking / route map
+- [x] Flight tracking / route map
 - [ ] Event notifications
 - [ ] Prefile Notifications on new Prefiles for a set Facility for controlers
+- [ ] Traductions and Bot settings

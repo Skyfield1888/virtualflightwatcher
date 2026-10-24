@@ -6,6 +6,7 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/Skyfield1888/virtualflightwatcher/api/geo"
 	ivao "github.com/Skyfield1888/virtualflightwatcher/api/ivao"
 	vatsim "github.com/Skyfield1888/virtualflightwatcher/api/vatsim"
 	"github.com/bwmarrin/discordgo"
@@ -134,6 +135,41 @@ func getOptions(i *discordgo.InteractionCreate) map[string]*discordgo.Applicatio
 	return optionMap
 }
 
+func formatSeconds(s int) string { // IVAO durations (seconds)
+	return fmt.Sprintf("%02dh %02dm", s/3600, (s%3600)/60)
+}
+
+func formatClock(s int) string { // IVAO time of day (seconds from 00:00 Z)
+	s %= 86400
+	return fmt.Sprintf("%02d:%02d Z", s/3600, (s%3600)/60)
+}
+
+func formatHHMMZ(hhmm string) string { // VATSIM "1215" -> "12:15 Z"
+	for len(hhmm) < 4 {
+		hhmm = "0" + hhmm
+	}
+	return hhmm[:2] + ":" + hhmm[2:] + " Z"
+}
+
+func yesNo(b bool) string {
+	if b {
+		return "Oui"
+	}
+	return "Non"
+}
+
+func ivaoQnh(info ivao.PilotInfo) string {
+	if info.FlightPlan == nil {
+		return "N/A"
+	}
+	hpa, icao, ok := geo.QNHNear(info.FlightPlan.DepartureId, info.FlightPlan.ArrivalId,
+		geo.Point{Lat: info.LastTrack.Latitude, Lon: info.LastTrack.Longitude})
+	if !ok {
+		return "N/A"
+	}
+	return fmt.Sprintf("%.0f hPa / %.2f inHg (%s)", hpa, hpa*0.02953, icao)
+}
+
 func vatsimPilotEmbed(info vatsim.PilotInfo) *discordgo.MessageEmbed {
 	return &discordgo.MessageEmbed{
 		Title:       info.Callsign + "  •  " + info.FlightPlan.Departure + " → " + info.FlightPlan.Arrival + "  •  VATSIM",
@@ -145,7 +181,7 @@ func vatsimPilotEmbed(info vatsim.PilotInfo) *discordgo.MessageEmbed {
 			{Name: "État", Value: fmt.Sprintf("**Alt:** %d ft\n**GS:** %d kts\n**HDG:** %d°", info.Altitude, info.Groundspeed, info.Heading), Inline: true},
 			{Name: "Météo", Value: fmt.Sprintf("**QNH:** %.2f inHg\n**QNH:** %d hPa\n**Squawk:** %s", info.QnhInHg, info.QnhInmB, info.Transponder), Inline: true},
 			{Name: "Plan de vol", Value: fmt.Sprintf("**Règles:** %s\n**Départ:** %s\n**Arrivée:** %s\n**Alternate:** %s", formatFlightRules(info.FlightPlan.FlightRules), info.FlightPlan.Departure, info.FlightPlan.Arrival, info.FlightPlan.Alternate), Inline: true},
-			{Name: "Timing", Value: fmt.Sprintf("**Départ prévu:** %s\n**En route:** %s\n**Carburant:** %s", formatDuration(info.FlightPlan.Deptime), formatDuration(info.FlightPlan.EnrouteTime), formatDuration(info.FlightPlan.FuelTime)), Inline: true},
+			{Name: "Timing", Value: fmt.Sprintf("**Départ prévu:** %s\n**En route:** %s\n**Carburant:** %s", formatHHMMZ(info.FlightPlan.Deptime), formatDuration(info.FlightPlan.EnrouteTime), formatDuration(info.FlightPlan.FuelTime)), Inline: true},
 			{Name: "Technique", Value: fmt.Sprintf("**Avion (FAA):** %s\n**Squawk assigné:** %s\n**Serveur:** %s", info.FlightPlan.AircraftFaa, info.FlightPlan.AssignedTransponder, info.Server), Inline: true},
 			{Name: "Remarques", Value: fmt.Sprintf("```%s```", info.FlightPlan.Remarks), Inline: false},
 		},
@@ -173,13 +209,13 @@ func ivaoPilotEmbed(info ivao.PilotInfo) *discordgo.MessageEmbed {
 			alternate = "N/A"
 		}
 		if fp.DepartureTime > 0 {
-			deptime = formatDuration(fmt.Sprintf("%04d", fp.DepartureTime))
+			deptime = formatClock(fp.DepartureTime)
 		}
 		if fp.Eet > 0 {
-			enroute = fmt.Sprintf("%02dh %02dm", fp.Eet/60, fp.Eet%60)
+			enroute = formatSeconds(fp.Eet)
 		}
 		if fp.Endurance > 0 {
-			fuel = fmt.Sprintf("%02dh %02dm", fp.Endurance/60, fp.Endurance%60)
+			fuel = formatSeconds(fp.Endurance)
 		}
 	}
 	return &discordgo.MessageEmbed{
@@ -190,10 +226,10 @@ func ivaoPilotEmbed(info ivao.PilotInfo) *discordgo.MessageEmbed {
 			{Name: "Route", Value: fmt.Sprintf("```%s```", route), Inline: false},
 			{Name: "Position", Value: fmt.Sprintf("**Lat:** %.4f °\n**Lon:** %.4f °", info.LastTrack.Latitude, info.LastTrack.Longitude), Inline: true},
 			{Name: "État", Value: fmt.Sprintf("**Alt:** %d ft\n**GS:** %d kts\n**HDG:** %d°\n**État:** %s", info.LastTrack.Altitude, info.LastTrack.Groundspeed, info.LastTrack.Heading, info.LastTrack.State), Inline: true},
-			{Name: "Météo", Value: fmt.Sprintf("**QNH:** N/A\n**Squawk:** %d", info.LastTrack.Transponder), Inline: true},
+			{Name: "Météo", Value: fmt.Sprintf("**QNH:** %s\n**Squawk:** %04d", ivaoQnh(info), info.LastTrack.Transponder), Inline: true},
 			{Name: "Plan de vol", Value: fmt.Sprintf("**Règles:** %s\n**Départ:** %s\n**Arrivée:** %s\n**Alternate:** %s", flightRules, dep, arr, alternate), Inline: true},
 			{Name: "Timing", Value: fmt.Sprintf("**Départ prévu:** %s\n**En route:** %s\n**Carburant:** %s", deptime, enroute, fuel), Inline: true},
-			{Name: "Technique", Value: fmt.Sprintf("**Avion (FAA):** %s\n**Au sol:** %t\n**Serveur:** %s", aircraftFaa, info.LastTrack.OnGround, info.ServerId), Inline: true},
+			{Name: "Technique", Value: fmt.Sprintf("**Avion (FAA):** %s\n**Au sol:** %s\n**Serveur:** %s", aircraftFaa, yesNo(info.LastTrack.OnGround), info.ServerId), Inline: true},
 			{Name: "Remarques", Value: fmt.Sprintf("```%s```", remarks), Inline: false},
 		},
 		Footer: &discordgo.MessageEmbedFooter{
@@ -271,7 +307,7 @@ func vatsimPrefileEmbed(info vatsim.PrefileInfo) *discordgo.MessageEmbed {
 			{Name: "Aéronef", Value: info.FlightPlan.AircraftFaa, Inline: true},
 			{Name: "Règles de vol", Value: info.FlightPlan.FlightRules, Inline: true},
 			{Name: "Transpondeur", Value: "`" + info.FlightPlan.AssignedTransponder + "`", Inline: true},
-			{Name: "Départ prévu", Value: info.FlightPlan.Deptime + " Z", Inline: true},
+			{Name: "Départ prévu", Value: formatHHMMZ(info.FlightPlan.Deptime), Inline: true},
 			{Name: "Temps de route", Value: info.FlightPlan.EnrouteTime, Inline: true},
 			{Name: "Carburant", Value: info.FlightPlan.FuelTime, Inline: true},
 			{Name: "Route", Value: fmt.Sprintf("```%s```", info.FlightPlan.Route), Inline: false},
@@ -371,6 +407,23 @@ func idOrNameOptions(entity string) []*discordgo.ApplicationCommandOption {
 	}
 }
 
+func withMap(e *discordgo.MessageEmbed, mapURL string) *discordgo.MessageEmbed {
+	if mapURL != "" {
+		e.Image = &discordgo.MessageEmbedImage{URL: mapURL}
+		e.Footer.Text += "  •  © Mapbox © OpenStreetMap"
+	}
+	return e
+}
+
+func ivaoMapURL(info ivao.PilotInfo) string {
+	cur := &geo.Point{Lat: info.LastTrack.Latitude, Lon: info.LastTrack.Longitude}
+	if info.FlightPlan == nil {
+		return geo.FlightMapURL("", "", "", cur)
+	}
+	fp := info.FlightPlan
+	return geo.FlightMapURL(fp.DepartureId, fp.ArrivalId, fp.Route, cur)
+}
+
 var Commands = []*discordgo.ApplicationCommand{
 	{Name: "pilot", Description: "Get a Pilot info from VATSIM or IVAO", Options: networkAndIdentOptions("Pilot")},
 	{Name: "controller", Description: "Get a Controller info from VATSIM or IVAO", Options: networkAndIdentOptions("Controller")},
@@ -400,7 +453,7 @@ var CommandHandlers = map[string]func(session *discordgo.Session, interaction *d
 				respondError(session, interaction, err.Error())
 				return
 			}
-			respond(session, interaction, ivaoPilotEmbed(info))
+			respond(session, interaction, withMap(ivaoPilotEmbed(info), ivaoMapURL(info)))
 			return
 		}
 
@@ -416,7 +469,10 @@ var CommandHandlers = map[string]func(session *discordgo.Session, interaction *d
 			respondError(session, interaction, err.Error())
 			return
 		}
-		respond(session, interaction, vatsimPilotEmbed(info))
+		fp := info.FlightPlan
+		respond(session, interaction, withMap(vatsimPilotEmbed(info),
+			geo.FlightMapURL(fp.Departure, fp.Arrival, fp.Route,
+				&geo.Point{Lat: info.Latitude, Lon: info.Longitude})))
 	},
 
 	"controller": func(session *discordgo.Session, interaction *discordgo.InteractionCreate) {
@@ -513,7 +569,8 @@ var CommandHandlers = map[string]func(session *discordgo.Session, interaction *d
 			respondError(session, interaction, err.Error())
 			return
 		}
-		respond(session, interaction, vatsimPrefileEmbed(info))
+		respond(session, interaction, withMap(vatsimPrefileEmbed(info),
+			geo.FlightMapURL(info.FlightPlan.Departure, info.FlightPlan.Arrival, info.FlightPlan.Route, nil)))
 	},
 
 	"facility": func(session *discordgo.Session, interaction *discordgo.InteractionCreate) {
