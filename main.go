@@ -9,12 +9,22 @@ import (
 	"github.com/Skyfield1888/virtualflightwatcher/api/geo"
 	"github.com/Skyfield1888/virtualflightwatcher/api/ivao"
 	"github.com/Skyfield1888/virtualflightwatcher/api/vatsim"
+	"github.com/Skyfield1888/virtualflightwatcher/config"
 	"github.com/Skyfield1888/virtualflightwatcher/discord_utils/commands"
 	"github.com/bwmarrin/discordgo"
 	_ "github.com/joho/godotenv/autoload"
 )
 
 func main() {
+	settingsPath := os.Getenv("SETTINGS_PATH")
+	if settingsPath == "" {
+		settingsPath = "data/settings.json"
+	}
+	if err := config.Load(settingsPath); err != nil {
+		fmt.Println("Error loading settings:", err)
+		return
+	}
+
 	token := os.Getenv("DISCORD_TOKEN")
 	discord, err := discordgo.New("Bot " + token)
 	if err != nil {
@@ -33,11 +43,7 @@ func main() {
 		}
 	}()
 
-	discord.AddHandler(func(s *discordgo.Session, i *discordgo.InteractionCreate) {
-		if h, ok := commands.CommandHandlers[i.ApplicationCommandData().Name]; ok {
-			h(s, i)
-		}
-	})
+	discord.AddHandler(commands.Dispatch)
 
 	for _, cmd := range commands.Commands {
 		discord.ApplicationCommandCreate(discord.State.User.ID, "", cmd)

@@ -343,9 +343,15 @@ func FlightMapURL(depICAO, arrICAO, route string, cur *Point) string {
 		if cur != nil {
 			overlays = append(overlays, marker("pin-l-airport+ed4245", *cur))
 		}
+		// Mapbox only accepts "padding" together with "auto" or "bbox"; with a centre/zoom view
+		// (a single locatable point) it rejects the request and no image is shown.
+		query := "logo=false&attribution=false"
+		if view == "auto" {
+			query = "padding=70&" + query
+		}
 		return fmt.Sprintf(
-			"https://api.mapbox.com/styles/v1/mapbox/dark-v11/static/%s/%s/900x500@2x?padding=70&logo=false&attribution=false&access_token=%s",
-			strings.Join(overlays, ","), view, token)
+			"https://api.mapbox.com/styles/v1/mapbox/dark-v11/static/%s/%s/900x500@2x?%s&access_token=%s",
+			strings.Join(overlays, ","), view, query, token)
 	}
 
 	u := build(via)

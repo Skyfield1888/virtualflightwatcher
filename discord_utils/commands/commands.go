@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
@@ -9,6 +10,7 @@ import (
 	"github.com/Skyfield1888/virtualflightwatcher/api/geo"
 	ivao "github.com/Skyfield1888/virtualflightwatcher/api/ivao"
 	vatsim "github.com/Skyfield1888/virtualflightwatcher/api/vatsim"
+	"github.com/Skyfield1888/virtualflightwatcher/config"
 	"github.com/bwmarrin/discordgo"
 )
 
@@ -18,6 +20,12 @@ func isPilotCallsign(s string) bool {
 
 func isFacilityCallsign(s string) bool {
 	return regexp.MustCompile(`(?i)^[A-Z]{2,7}(_+[A-Z0-9]{1,3})*_+(DEL|GND|TWR|APP|DEP|CTR|FSS|ATIS|OBS|AFIS|INFO|RADAR|OCA)$`).MatchString(s)
+}
+
+// normalizeCallsign trims spaces and uppercases, so "afr123" and " Afr123 " match "AFR123".
+// CIDs (digits only) are not affected.
+func normalizeCallsign(s string) string {
+	return strings.ToUpper(strings.TrimSpace(s))
 }
 
 func isNumeric(s string) bool {
@@ -110,21 +118,17 @@ func toAtisCallsign(s string) string {
 	return s + "_ATIS"
 }
 
+// respond honours the "private replies" setting (send is in settings.go).
 func respond(s *discordgo.Session, i *discordgo.InteractionCreate, embed *discordgo.MessageEmbed) {
-	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-		Type: discordgo.InteractionResponseChannelMessageWithSource,
-		Data: &discordgo.InteractionResponseData{
-			Embeds: []*discordgo.MessageEmbed{embed},
-		},
-	})
+	send(s, i, embed, SettingsOf(i).Ephemeral)
 }
 
 func respondError(s *discordgo.Session, i *discordgo.InteractionCreate, message string) {
-	respond(s, i, &discordgo.MessageEmbed{
-		Title:       "Erreur",
+	send(s, i, &discordgo.MessageEmbed{
+		Title:       tr(SettingsOf(i))("error.title"),
 		Description: message,
 		Color:       0xFF0000,
-	})
+	}, true)
 }
 
 func getOptions(i *discordgo.InteractionCreate) map[string]*discordgo.ApplicationCommandInteractionDataOption {
@@ -151,14 +155,14 @@ func formatHHMMZ(hhmm string) string { // VATSIM "1215" -> "12:15 Z"
 	return hhmm[:2] + ":" + hhmm[2:] + " Z"
 }
 
-func yesNo(b bool) string {
+func yesNo(b bool, st config.Settings) string {
 	if b {
-		return "Oui"
+		return tr(st)("yes")
 	}
-	return "Non"
+	return tr(st)("no")
 }
 
-func ivaoQnh(info ivao.PilotInfo) string {
+func ivaoQnh(info ivao.PilotInfo, st config.Settings) string {
 	if info.FlightPlan == nil {
 		return "N/A"
 	}
@@ -167,31 +171,64 @@ func ivaoQnh(info ivao.PilotInfo) string {
 	if !ok {
 		return "N/A"
 	}
+	if isMetric(st) {
+		return fmt.Sprintf("%.0f hPa (%s)", hpa, icao)
+	}
+	if isImperial(st) {
+		return fmt.Sprintf("%.2f inHg (%s)", hpa*0.02953, icao)
+	}
 	return fmt.Sprintf("%.0f hPa / %.2f inHg (%s)", hpa, hpa*0.02953, icao)
 }
 
-func vatsimPilotEmbed(info vatsim.PilotInfo) *discordgo.MessageEmbed {
+// orNA replaces empty values (pilots without a filed flight plan) by "N/A".
+func orNA(s string) string {
+	if strings.TrimSpace(s) == "" {
+		return "N/A"
+	}
+	return s
+}
+
+func vatsimPilotEmbed(info vatsim.PilotInfo, st config.Settings) *discordgo.MessageEmbed {
+	t := tr(st)
+	fp := info.FlightPlan
+
+	title := info.Callsign
+	if fp.Departure != "" || fp.Arrival != "" {
+		title += "  •  " + orNA(fp.Departure) + " → " + orNA(fp.Arrival)
+	}
+	title += "  •  VATSIM"
+
+	etd, enroute, fuel := "N/A", "N/A", "N/A"
+	if fp.Deptime != "" {
+		etd = formatHHMMZ(fp.Deptime)
+	}
+	if fp.EnrouteTime != "" {
+		enroute = formatDuration(fp.EnrouteTime)
+	}
+	if fp.FuelTime != "" {
+		fuel = formatDuration(fp.FuelTime)
+	}
+
 	return &discordgo.MessageEmbed{
-		Title:       info.Callsign + "  •  " + info.FlightPlan.Departure + " → " + info.FlightPlan.Arrival + "  •  VATSIM",
-		Description: fmt.Sprintf("**%s** | %s | CID: `%d`", info.Name, info.FlightPlan.AircraftShort, info.Cid),
+		Title:       title,
+		Description: fmt.Sprintf("**%s** | %s | CID: `%d`", info.Name, orNA(fp.AircraftShort), info.Cid),
 		Color:       0x5865F2,
 		Fields: []*discordgo.MessageEmbedField{
-			{Name: "Route", Value: fmt.Sprintf("```%s```", info.FlightPlan.Route), Inline: false},
-			{Name: "Position", Value: fmt.Sprintf("**Lat:** %.4f °\n**Lon:** %.4f °", info.Latitude, info.Longitude), Inline: true},
-			{Name: "État", Value: fmt.Sprintf("**Alt:** %d ft\n**GS:** %d kts\n**HDG:** %d°", info.Altitude, info.Groundspeed, info.Heading), Inline: true},
-			{Name: "Météo", Value: fmt.Sprintf("**QNH:** %.2f inHg\n**QNH:** %d hPa\n**Squawk:** %s", info.QnhInHg, info.QnhInmB, info.Transponder), Inline: true},
-			{Name: "Plan de vol", Value: fmt.Sprintf("**Règles:** %s\n**Départ:** %s\n**Arrivée:** %s\n**Alternate:** %s", formatFlightRules(info.FlightPlan.FlightRules), info.FlightPlan.Departure, info.FlightPlan.Arrival, info.FlightPlan.Alternate), Inline: true},
-			{Name: "Timing", Value: fmt.Sprintf("**Départ prévu:** %s\n**En route:** %s\n**Carburant:** %s", formatHHMMZ(info.FlightPlan.Deptime), formatDuration(info.FlightPlan.EnrouteTime), formatDuration(info.FlightPlan.FuelTime)), Inline: true},
-			{Name: "Technique", Value: fmt.Sprintf("**Avion (FAA):** %s\n**Squawk assigné:** %s\n**Serveur:** %s", info.FlightPlan.AircraftFaa, info.FlightPlan.AssignedTransponder, info.Server), Inline: true},
-			{Name: "Remarques", Value: fmt.Sprintf("```%s```", info.FlightPlan.Remarks), Inline: false},
+			{Name: t("f.route"), Value: fmt.Sprintf("```%s```", orNA(fp.Route)), Inline: false},
+			{Name: t("f.position"), Value: fmt.Sprintf("**Lat:** %.4f °\n**Lon:** %.4f °", info.Latitude, info.Longitude), Inline: true},
+			{Name: t("f.state"), Value: fmt.Sprintf("**Alt:** %s\n**GS:** %s\n**HDG:** %d°", fmtAltitude(info.Altitude, st), fmtSpeed(info.Groundspeed, st), info.Heading), Inline: true},
+			{Name: t("f.weather"), Value: fmt.Sprintf("%s\n**Squawk:** %s", fmtPressure(info.QnhInHg, info.QnhInmB, st), info.Transponder), Inline: true},
+			{Name: t("f.flightplan"), Value: fmt.Sprintf("**%s:** %s\n**%s:** %s\n**%s:** %s\n**%s:** %s", t("l.rules"), orNA(formatFlightRules(fp.FlightRules)), t("l.dep"), orNA(fp.Departure), t("l.arr"), orNA(fp.Arrival), t("l.alt"), orNA(fp.Alternate)), Inline: true},
+			{Name: t("f.timing"), Value: fmt.Sprintf("**%s:** %s\n**%s:** %s\n**%s:** %s", t("l.etd"), etd, t("l.enroute"), enroute, t("l.fuel"), fuel), Inline: true},
+			{Name: t("f.tech"), Value: fmt.Sprintf("**%s:** %s\n**%s:** %s\n**%s:** %s", t("l.ac"), orNA(fp.AircraftFaa), t("l.assigned"), orNA(fp.AssignedTransponder), t("f.server"), info.Server), Inline: true},
+			{Name: t("f.remarks"), Value: fmt.Sprintf("```%s```", orNA(fp.Remarks)), Inline: false},
 		},
-		Footer: &discordgo.MessageEmbedFooter{
-			Text: "VATSIM  •  Connecté depuis " + info.LogonTime + "  •  Mis à jour " + info.LastUpdated,
-		},
+		Footer: footer("VATSIM", st, info.LogonTime, info.LastUpdated),
 	}
 }
 
-func ivaoPilotEmbed(info ivao.PilotInfo) *discordgo.MessageEmbed {
+func ivaoPilotEmbed(info ivao.PilotInfo, st config.Settings) *discordgo.MessageEmbed {
+	t := tr(st)
 	dep, arr := "N/A", "N/A"
 	route, remarks, aircraft, aircraftFaa := "N/A", "N/A", "N/A", "N/A"
 	flightRules, alternate, deptime, enroute, fuel := "N/A", "N/A", "N/A", "N/A", "N/A"
@@ -223,56 +260,53 @@ func ivaoPilotEmbed(info ivao.PilotInfo) *discordgo.MessageEmbed {
 		Description: fmt.Sprintf("**%s %s** | %s | ID: `%d`", info.User.FirstName, info.User.LastName, aircraft, info.UserId),
 		Color:       0x5865F2,
 		Fields: []*discordgo.MessageEmbedField{
-			{Name: "Route", Value: fmt.Sprintf("```%s```", route), Inline: false},
-			{Name: "Position", Value: fmt.Sprintf("**Lat:** %.4f °\n**Lon:** %.4f °", info.LastTrack.Latitude, info.LastTrack.Longitude), Inline: true},
-			{Name: "État", Value: fmt.Sprintf("**Alt:** %d ft\n**GS:** %d kts\n**HDG:** %d°\n**État:** %s", info.LastTrack.Altitude, info.LastTrack.Groundspeed, info.LastTrack.Heading, info.LastTrack.State), Inline: true},
-			{Name: "Météo", Value: fmt.Sprintf("**QNH:** %s\n**Squawk:** %04d", ivaoQnh(info), info.LastTrack.Transponder), Inline: true},
-			{Name: "Plan de vol", Value: fmt.Sprintf("**Règles:** %s\n**Départ:** %s\n**Arrivée:** %s\n**Alternate:** %s", flightRules, dep, arr, alternate), Inline: true},
-			{Name: "Timing", Value: fmt.Sprintf("**Départ prévu:** %s\n**En route:** %s\n**Carburant:** %s", deptime, enroute, fuel), Inline: true},
-			{Name: "Technique", Value: fmt.Sprintf("**Avion (FAA):** %s\n**Au sol:** %s\n**Serveur:** %s", aircraftFaa, yesNo(info.LastTrack.OnGround), info.ServerId), Inline: true},
-			{Name: "Remarques", Value: fmt.Sprintf("```%s```", remarks), Inline: false},
+			{Name: t("f.route"), Value: fmt.Sprintf("```%s```", route), Inline: false},
+			{Name: t("f.position"), Value: fmt.Sprintf("**Lat:** %.4f °\n**Lon:** %.4f °", info.LastTrack.Latitude, info.LastTrack.Longitude), Inline: true},
+			{Name: t("f.state"), Value: fmt.Sprintf("**Alt:** %s\n**GS:** %s\n**HDG:** %d°\n**%s:** %s", fmtAltitude(info.LastTrack.Altitude, st), fmtSpeed(info.LastTrack.Groundspeed, st), info.LastTrack.Heading, t("l.state"), info.LastTrack.State), Inline: true},
+			{Name: t("f.weather"), Value: fmt.Sprintf("**QNH:** %s\n**Squawk:** %04d", ivaoQnh(info, st), info.LastTrack.Transponder), Inline: true},
+			{Name: t("f.flightplan"), Value: fmt.Sprintf("**%s:** %s\n**%s:** %s\n**%s:** %s\n**%s:** %s", t("l.rules"), flightRules, t("l.dep"), dep, t("l.arr"), arr, t("l.alt"), alternate), Inline: true},
+			{Name: t("f.timing"), Value: fmt.Sprintf("**%s:** %s\n**%s:** %s\n**%s:** %s", t("l.etd"), deptime, t("l.enroute"), enroute, t("l.fuel"), fuel), Inline: true},
+			{Name: t("f.tech"), Value: fmt.Sprintf("**%s:** %s\n**%s:** %s\n**%s:** %s", t("l.ac"), aircraftFaa, t("l.onground"), yesNo(info.LastTrack.OnGround, st), t("f.server"), info.ServerId), Inline: true},
+			{Name: t("f.remarks"), Value: fmt.Sprintf("```%s```", remarks), Inline: false},
 		},
-		Footer: &discordgo.MessageEmbedFooter{
-			Text: "IVAO  •  Connecté depuis " + info.CreatedAt,
-		},
+		Footer: footer("IVAO", st, info.CreatedAt, ""),
 	}
 }
 
-func vatsimControllerEmbed(info vatsim.ControllerInfo) *discordgo.MessageEmbed {
+func vatsimControllerEmbed(info vatsim.ControllerInfo, st config.Settings) *discordgo.MessageEmbed {
+	t := tr(st)
 	return &discordgo.MessageEmbed{
 		Title:       info.Callsign + "  •  " + formatFacility(info.Facility) + "  •  VATSIM",
 		Description: fmt.Sprintf("**%s** | CID: `%d` | %s", info.Name, info.Cid, formatRating(info.Rating)),
 		Color:       0x57F287,
 		Fields: []*discordgo.MessageEmbedField{
 			{Name: "ATIS", Value: fmt.Sprintf("```%s```", strings.Join(info.TextPosition, "\n")), Inline: false},
-			{Name: "Fréquence", Value: info.Frequency + " MHz", Inline: true},
-			{Name: "Portée visuelle", Value: fmt.Sprintf("%d nm", info.VisualRange), Inline: true},
-			{Name: "Serveur", Value: info.Server, Inline: true},
+			{Name: t("f.freq"), Value: info.Frequency + " MHz", Inline: true},
+			{Name: t("f.range"), Value: fmtDistance(info.VisualRange, st), Inline: true},
+			{Name: t("f.server"), Value: info.Server, Inline: true},
 		},
-		Footer: &discordgo.MessageEmbedFooter{
-			Text: "VATSIM  •  Connecté depuis " + info.LogonTime + "  •  Mis à jour " + info.LastUpdated,
-		},
+		Footer: footer("VATSIM", st, info.LogonTime, info.LastUpdated),
 	}
 }
 
-func vatsimAtisEmbed(info vatsim.AtisInfo) *discordgo.MessageEmbed {
+func vatsimAtisEmbed(info vatsim.AtisInfo, st config.Settings) *discordgo.MessageEmbed {
+	t := tr(st)
 	return &discordgo.MessageEmbed{
 		Title:       info.Callsign + "  •  " + formatFacility(info.Facility) + "  •  VATSIM",
 		Description: fmt.Sprintf("**%s** | CID: `%d` | %s", info.Name, info.Cid, formatRating(info.Rating)),
 		Color:       0x57F287,
 		Fields: []*discordgo.MessageEmbedField{
 			{Name: "ATIS " + info.AtisCode, Value: fmt.Sprintf("```%s```", strings.Join(info.TextAtis, "\n")), Inline: false},
-			{Name: "Fréquence", Value: info.Frequency + " MHz", Inline: true},
-			{Name: "Portée visuelle", Value: fmt.Sprintf("%d nm", info.VisualRange), Inline: true},
-			{Name: "Serveur", Value: info.Server, Inline: true},
+			{Name: t("f.freq"), Value: info.Frequency + " MHz", Inline: true},
+			{Name: t("f.range"), Value: fmtDistance(info.VisualRange, st), Inline: true},
+			{Name: t("f.server"), Value: info.Server, Inline: true},
 		},
-		Footer: &discordgo.MessageEmbedFooter{
-			Text: "VATSIM  •  Connecté depuis " + info.LogonTime + "  •  Mis à jour " + info.LastUpdated,
-		},
+		Footer: footer("VATSIM", st, info.LogonTime, info.LastUpdated),
 	}
 }
 
-func ivaoControllerAndAtisEmbed(info ivao.AtcInfo) *discordgo.MessageEmbed {
+func ivaoControllerAndAtisEmbed(info ivao.AtcInfo, st config.Settings) *discordgo.MessageEmbed {
+	t := tr(st)
 	atisText := "N/A"
 	atisTitle := "ATIS"
 	if info.Atis != nil && len(info.Atis.Lines) > 0 {
@@ -287,111 +321,114 @@ func ivaoControllerAndAtisEmbed(info ivao.AtcInfo) *discordgo.MessageEmbed {
 		Color:       0x57F287,
 		Fields: []*discordgo.MessageEmbedField{
 			{Name: atisTitle, Value: fmt.Sprintf("```%s```", atisText), Inline: false},
-			{Name: "Fréquence", Value: fmt.Sprintf("%.3f MHz", info.AtcSession.Frequency), Inline: true},
-			{Name: "Portée visuelle", Value: "N/A", Inline: true},
-			{Name: "Serveur", Value: info.ServerId, Inline: true},
+			{Name: t("f.freq"), Value: fmt.Sprintf("%.3f MHz", info.AtcSession.Frequency), Inline: true},
+			{Name: t("f.range"), Value: "N/A", Inline: true},
+			{Name: t("f.server"), Value: info.ServerId, Inline: true},
 		},
-		Footer: &discordgo.MessageEmbedFooter{
-			Text: "IVAO  •  Connecté depuis " + info.CreatedAt,
-		},
+		Footer: footer("IVAO", st, info.CreatedAt, ""),
 	}
 }
 
-func vatsimPrefileEmbed(info vatsim.PrefileInfo) *discordgo.MessageEmbed {
+func vatsimPrefileEmbed(info vatsim.PrefileInfo, st config.Settings) *discordgo.MessageEmbed {
+	t := tr(st)
 	return &discordgo.MessageEmbed{
-		Title:       info.Callsign + "  •  Préfile  •  VATSIM",
+		Title:       info.Callsign + "  •  " + t("t.prefile") + "  •  VATSIM",
 		Description: fmt.Sprintf("**%s** | CID: `%d`", info.Name, info.Cid),
 		Color:       0xFEE75C,
 		Fields: []*discordgo.MessageEmbedField{
-			{Name: "Itinéraire", Value: fmt.Sprintf("`%s` → `%s`", info.FlightPlan.Departure, info.FlightPlan.Arrival), Inline: false},
-			{Name: "Aéronef", Value: info.FlightPlan.AircraftFaa, Inline: true},
-			{Name: "Règles de vol", Value: info.FlightPlan.FlightRules, Inline: true},
-			{Name: "Transpondeur", Value: "`" + info.FlightPlan.AssignedTransponder + "`", Inline: true},
-			{Name: "Départ prévu", Value: formatHHMMZ(info.FlightPlan.Deptime), Inline: true},
-			{Name: "Temps de route", Value: info.FlightPlan.EnrouteTime, Inline: true},
-			{Name: "Carburant", Value: info.FlightPlan.FuelTime, Inline: true},
-			{Name: "Route", Value: fmt.Sprintf("```%s```", info.FlightPlan.Route), Inline: false},
-			{Name: "Remarques", Value: fmt.Sprintf("```%s```", info.FlightPlan.Remarks), Inline: false},
+			{Name: t("f.itinerary"), Value: fmt.Sprintf("`%s` → `%s`", info.FlightPlan.Departure, info.FlightPlan.Arrival), Inline: false},
+			{Name: t("f.aircraft"), Value: info.FlightPlan.AircraftFaa, Inline: true},
+			{Name: t("f.rules"), Value: info.FlightPlan.FlightRules, Inline: true},
+			{Name: t("f.xpdr"), Value: "`" + info.FlightPlan.AssignedTransponder + "`", Inline: true},
+			{Name: t("f.etd"), Value: formatHHMMZ(info.FlightPlan.Deptime), Inline: true},
+			{Name: t("f.ete"), Value: info.FlightPlan.EnrouteTime, Inline: true},
+			{Name: t("f.fuel"), Value: info.FlightPlan.FuelTime, Inline: true},
+			{Name: t("f.route"), Value: fmt.Sprintf("```%s```", info.FlightPlan.Route), Inline: false},
+			{Name: t("f.remarks"), Value: fmt.Sprintf("```%s```", info.FlightPlan.Remarks), Inline: false},
 		},
-		Footer: &discordgo.MessageEmbedFooter{
-			Text: "VATSIM  •  Préfile  •  Mis à jour " + info.LastUpdated,
-		},
+		Footer: footer("VATSIM  •  "+t("t.prefile"), st, "", info.LastUpdated),
 	}
 }
 
-func vatsimFacilityEmbed(info vatsim.FacilityInfo) *discordgo.MessageEmbed {
+func vatsimFacilityEmbed(info vatsim.FacilityInfo, st config.Settings) *discordgo.MessageEmbed {
+	t := tr(st)
 	return &discordgo.MessageEmbed{
 		Title:       fmt.Sprintf("%s  •  Facility  •  VATSIM", info.ShortName),
 		Description: info.LongName,
 		Color:       0xEB459E,
 		Fields: []*discordgo.MessageEmbedField{
 			{Name: "ID", Value: fmt.Sprintf("`%d`", info.Id), Inline: true},
-			{Name: "Nom court", Value: info.ShortName, Inline: true},
-			{Name: "Nom complet", Value: info.LongName, Inline: true},
+			{Name: t("f.shortname"), Value: info.ShortName, Inline: true},
+			{Name: t("f.longname"), Value: info.LongName, Inline: true},
 		},
 		Footer: &discordgo.MessageEmbedFooter{Text: "VATSIM  •  Facility"},
 	}
 }
 
-func vatsimRatingEmbed(info vatsim.RatingInfo) *discordgo.MessageEmbed {
+func vatsimRatingEmbed(info vatsim.RatingInfo, st config.Settings) *discordgo.MessageEmbed {
+	t := tr(st)
 	return &discordgo.MessageEmbed{
 		Title:       fmt.Sprintf("%s  •  ATC Rating  •  VATSIM", info.ShortName),
 		Description: info.LongName,
 		Color:       0xED4245,
 		Fields: []*discordgo.MessageEmbedField{
 			{Name: "ID", Value: fmt.Sprintf("`%d`", info.Id), Inline: true},
-			{Name: "Nom court", Value: info.ShortName, Inline: true},
-			{Name: "Nom complet", Value: info.LongName, Inline: true},
+			{Name: t("f.shortname"), Value: info.ShortName, Inline: true},
+			{Name: t("f.longname"), Value: info.LongName, Inline: true},
 		},
 		Footer: &discordgo.MessageEmbedFooter{Text: "VATSIM  •  ATC Rating"},
 	}
 }
 
-func vatsimPilotRatingEmbed(info vatsim.PilotRatingInfo) *discordgo.MessageEmbed {
+func vatsimPilotRatingEmbed(info vatsim.PilotRatingInfo, st config.Settings) *discordgo.MessageEmbed {
+	t := tr(st)
 	return &discordgo.MessageEmbed{
 		Title:       fmt.Sprintf("%s  •  Pilot Rating  •  VATSIM", info.ShortName),
 		Description: info.LongName,
 		Color:       0x5865F2,
 		Fields: []*discordgo.MessageEmbedField{
 			{Name: "ID", Value: fmt.Sprintf("`%d`", info.Id), Inline: true},
-			{Name: "Nom court", Value: info.ShortName, Inline: true},
-			{Name: "Nom complet", Value: info.LongName, Inline: true},
+			{Name: t("f.shortname"), Value: info.ShortName, Inline: true},
+			{Name: t("f.longname"), Value: info.LongName, Inline: true},
 		},
 		Footer: &discordgo.MessageEmbedFooter{Text: "VATSIM  •  Pilot Rating"},
 	}
 }
 
-func vatsimMilitaryRatingEmbed(info vatsim.MilitaryRatingInfo) *discordgo.MessageEmbed {
+func vatsimMilitaryRatingEmbed(info vatsim.MilitaryRatingInfo, st config.Settings) *discordgo.MessageEmbed {
+	t := tr(st)
 	return &discordgo.MessageEmbed{
 		Title:       fmt.Sprintf("%s  •  Military Rating  •  VATSIM", info.ShortName),
 		Description: info.LongName,
 		Color:       0x57F287,
 		Fields: []*discordgo.MessageEmbedField{
 			{Name: "ID", Value: fmt.Sprintf("`%d`", info.Id), Inline: true},
-			{Name: "Nom court", Value: info.ShortName, Inline: true},
-			{Name: "Nom complet", Value: info.LongName, Inline: true},
+			{Name: t("f.shortname"), Value: info.ShortName, Inline: true},
+			{Name: t("f.longname"), Value: info.LongName, Inline: true},
 		},
 		Footer: &discordgo.MessageEmbedFooter{Text: "VATSIM  •  Military Rating"},
 	}
 }
 
+// Discord requires required options first, so the (now optional) network option
+// comes after cid_or_callsign. No network = both VATSIM and IVAO are searched.
 func networkAndIdentOptions(entity string) []*discordgo.ApplicationCommandOption {
 	return []*discordgo.ApplicationCommandOption{
-		{
-			Type:        discordgo.ApplicationCommandOptionString,
-			Name:        "network",
-			Description: "On which network do you want to get the " + entity + " Info",
-			Required:    true,
-			Choices: []*discordgo.ApplicationCommandOptionChoice{
-				{Name: "VATSIM", Value: "VATSIM"},
-				{Name: "IVAO", Value: "IVAO"},
-			},
-		},
 		{
 			Type:        discordgo.ApplicationCommandOptionString,
 			Name:        "cid_or_callsign",
 			Description: "Find " + entity + " Info from CID or Callsign",
 			Required:    true,
+		},
+		{
+			Type:        discordgo.ApplicationCommandOptionString,
+			Name:        "network",
+			Description: "Network to search (leave empty to search both VATSIM and IVAO)",
+			Required:    false,
+			Choices: []*discordgo.ApplicationCommandOptionChoice{
+				{Name: "VATSIM", Value: config.NetworkVatsim},
+				{Name: "IVAO", Value: config.NetworkIvao},
+			},
 		},
 	}
 }
@@ -437,10 +474,32 @@ var Commands = []*discordgo.ApplicationCommand{
 
 var CommandHandlers = map[string]func(session *discordgo.Session, interaction *discordgo.InteractionCreate){
 	"pilot": func(session *discordgo.Session, interaction *discordgo.InteractionCreate) {
+		st := SettingsOf(interaction)
 		opts := getOptions(interaction)
-		cidOrCallsign := opts["cid_or_callsign"].StringValue()
+		cidOrCallsign := normalizeCallsign(opts["cid_or_callsign"].StringValue())
+		wantVatsim, wantIvao := wantedNetworks(opts)
 
-		if opts["network"].StringValue() == "IVAO" {
+		var embeds []*discordgo.MessageEmbed
+		var lastErr error
+
+		if wantVatsim {
+			var info vatsim.PilotInfo
+			var err error
+			if isPilotCallsign(cidOrCallsign) {
+				info, err = vatsim.GetPilotFromCallsign(cidOrCallsign)
+			} else {
+				info, err = vatsim.GetPilotFromId(cidOrCallsign)
+			}
+			if err != nil {
+				lastErr = err
+			} else {
+				fp := info.FlightPlan
+				embeds = append(embeds, withMap(vatsimPilotEmbed(info, st),
+					geo.FlightMapURL(fp.Departure, fp.Arrival, fp.Route,
+						&geo.Point{Lat: info.Latitude, Lon: info.Longitude})))
+			}
+		}
+		if wantIvao {
 			var info ivao.PilotInfo
 			var err error
 			if isPilotCallsign(cidOrCallsign) {
@@ -449,37 +508,38 @@ var CommandHandlers = map[string]func(session *discordgo.Session, interaction *d
 				info, err = ivao.GetPilotFromUserId(cidOrCallsign)
 			}
 			if err != nil {
-				fmt.Println(err)
-				respondError(session, interaction, err.Error())
-				return
+				lastErr = err
+			} else {
+				embeds = append(embeds, withMap(ivaoPilotEmbed(info, st), ivaoMapURL(info)))
 			}
-			respond(session, interaction, withMap(ivaoPilotEmbed(info), ivaoMapURL(info)))
-			return
 		}
-
-		var info vatsim.PilotInfo
-		var err error
-		if isPilotCallsign(cidOrCallsign) {
-			info, err = vatsim.GetPilotFromCallsign(cidOrCallsign)
-		} else {
-			info, err = vatsim.GetPilotFromId(cidOrCallsign)
-		}
-		if err != nil {
-			fmt.Println(err)
-			respondError(session, interaction, err.Error())
-			return
-		}
-		fp := info.FlightPlan
-		respond(session, interaction, withMap(vatsimPilotEmbed(info),
-			geo.FlightMapURL(fp.Departure, fp.Arrival, fp.Route,
-				&geo.Point{Lat: info.Latitude, Lon: info.Longitude})))
+		replyLookup(session, interaction, st, embeds, lastErr, wantVatsim && wantIvao)
 	},
 
 	"controller": func(session *discordgo.Session, interaction *discordgo.InteractionCreate) {
+		st := SettingsOf(interaction)
 		opts := getOptions(interaction)
-		cidOrCallsign := opts["cid_or_callsign"].StringValue()
+		cidOrCallsign := normalizeCallsign(opts["cid_or_callsign"].StringValue())
+		wantVatsim, wantIvao := wantedNetworks(opts)
 
-		if opts["network"].StringValue() == "IVAO" {
+		var embeds []*discordgo.MessageEmbed
+		var lastErr error
+
+		if wantVatsim {
+			var info vatsim.ControllerInfo
+			var err error
+			if isFacilityCallsign(cidOrCallsign) {
+				info, err = vatsim.GetControllerFromCallsign(cidOrCallsign)
+			} else {
+				info, err = vatsim.GetControllerFromId(cidOrCallsign)
+			}
+			if err != nil {
+				lastErr = err
+			} else {
+				embeds = append(embeds, vatsimControllerEmbed(info, st))
+			}
+		}
+		if wantIvao {
 			var info ivao.AtcInfo
 			var err error
 			if isFacilityCallsign(cidOrCallsign) {
@@ -488,75 +548,65 @@ var CommandHandlers = map[string]func(session *discordgo.Session, interaction *d
 				info, err = ivao.GetAtcFromUserId(cidOrCallsign)
 			}
 			if err != nil {
-				fmt.Println(err)
-				respondError(session, interaction, err.Error())
-				return
+				lastErr = err
+			} else {
+				embeds = append(embeds, ivaoControllerAndAtisEmbed(info, st))
 			}
-			respond(session, interaction, ivaoControllerAndAtisEmbed(info))
-			return
 		}
-
-		var info vatsim.ControllerInfo
-		var err error
-		if isFacilityCallsign(cidOrCallsign) {
-			info, err = vatsim.GetControllerFromCallsign(cidOrCallsign)
-		} else {
-			info, err = vatsim.GetControllerFromId(cidOrCallsign)
-		}
-		if err != nil {
-			fmt.Println(err)
-			respondError(session, interaction, err.Error())
-			return
-		}
-		respond(session, interaction, vatsimControllerEmbed(info))
+		replyLookup(session, interaction, st, embeds, lastErr, wantVatsim && wantIvao)
 	},
 
 	"atis": func(session *discordgo.Session, interaction *discordgo.InteractionCreate) {
+		st := SettingsOf(interaction)
 		opts := getOptions(interaction)
-		cidOrCallsign := opts["cid_or_callsign"].StringValue()
+		cidOrCallsign := normalizeCallsign(opts["cid_or_callsign"].StringValue())
+		wantVatsim, wantIvao := wantedNetworks(opts)
 
-		if opts["network"].StringValue() == "IVAO" {
+		var embeds []*discordgo.MessageEmbed
+		var lastErr error
+
+		if wantVatsim {
+			var info vatsim.AtisInfo
+			var err error
+			if isNumeric(cidOrCallsign) {
+				info, err = vatsim.GetAtisFromId(cidOrCallsign)
+			} else {
+				info, err = vatsim.GetAtisFromCallsign(toAtisCallsign(cidOrCallsign))
+			}
+			if err != nil {
+				lastErr = err
+			} else {
+				embeds = append(embeds, vatsimAtisEmbed(info, st))
+			}
+		}
+		if wantIvao {
 			// TODO : On IVAO ATC and ATIS are the same, but it will be great to just put the position name like LFBP insted of LFBP_TWR or LFBP_GND...
 			info, err := ivao.GetAtcFromCallsign(strings.ToUpper(cidOrCallsign))
-			if err != nil {
-				fmt.Println(err)
-				respondError(session, interaction, err.Error())
-				return
+			switch {
+			case err != nil:
+				lastErr = err
+			case info.Atis == nil:
+				lastErr = errors.New(tr(st)("error.no_atis"))
+			default:
+				embeds = append(embeds, ivaoControllerAndAtisEmbed(info, st))
 			}
-			if info.Atis == nil {
-				respondError(session, interaction, "Aucun ATIS disponible pour ce contrôleur.")
-				return
-			}
-			respond(session, interaction, ivaoControllerAndAtisEmbed(info))
-			return
 		}
-
-		atisCallsign := toAtisCallsign(cidOrCallsign)
-		var info vatsim.AtisInfo
-		var err error
-		if isFacilityCallsign(atisCallsign) {
-			info, err = vatsim.GetAtisFromCallsign(atisCallsign)
-		} else {
-			info, err = vatsim.GetAtisFromId(atisCallsign)
-		}
-		if err != nil {
-			fmt.Println(err)
-			respondError(session, interaction, err.Error())
-			return
-		}
-		respond(session, interaction, vatsimAtisEmbed(info))
+		replyLookup(session, interaction, st, embeds, lastErr, wantVatsim && wantIvao)
 	},
 
 	"prefile": func(session *discordgo.Session, interaction *discordgo.InteractionCreate) {
+		st := SettingsOf(interaction)
 		opts := getOptions(interaction)
+		wantVatsim, _ := wantedNetworks(opts)
 
-		if opts["network"].StringValue() == "IVAO" {
+		// IVAO has no prefiles: only an explicit network:IVAO is an error, "both" just returns VATSIM.
+		if !wantVatsim {
 			//TODO : Trouver un moyen pour les presets pour IVAO
-			respondError(session, interaction, "Les préfiles ne sont pas disponibles sur IVAO.")
+			respondError(session, interaction, tr(st)("error.ivao_prefile"))
 			return
 		}
 
-		cidOrCallsign := opts["cid_or_callsign"].StringValue()
+		cidOrCallsign := normalizeCallsign(opts["cid_or_callsign"].StringValue())
 		var info vatsim.PrefileInfo
 		var err error
 		if isPilotCallsign(cidOrCallsign) {
@@ -569,11 +619,12 @@ var CommandHandlers = map[string]func(session *discordgo.Session, interaction *d
 			respondError(session, interaction, err.Error())
 			return
 		}
-		respond(session, interaction, withMap(vatsimPrefileEmbed(info),
+		respond(session, interaction, withMap(vatsimPrefileEmbed(info, st),
 			geo.FlightMapURL(info.FlightPlan.Departure, info.FlightPlan.Arrival, info.FlightPlan.Route, nil)))
 	},
 
 	"facility": func(session *discordgo.Session, interaction *discordgo.InteractionCreate) {
+		st := SettingsOf(interaction)
 		query := getOptions(interaction)["id_or_name"].StringValue()
 		var info vatsim.FacilityInfo
 		var err error
@@ -586,10 +637,11 @@ var CommandHandlers = map[string]func(session *discordgo.Session, interaction *d
 			respondError(session, interaction, err.Error())
 			return
 		}
-		respond(session, interaction, vatsimFacilityEmbed(info))
+		respond(session, interaction, vatsimFacilityEmbed(info, st))
 	},
 
 	"rating": func(session *discordgo.Session, interaction *discordgo.InteractionCreate) {
+		st := SettingsOf(interaction)
 		query := getOptions(interaction)["id_or_name"].StringValue()
 		var info vatsim.RatingInfo
 		var err error
@@ -602,10 +654,11 @@ var CommandHandlers = map[string]func(session *discordgo.Session, interaction *d
 			respondError(session, interaction, err.Error())
 			return
 		}
-		respond(session, interaction, vatsimRatingEmbed(info))
+		respond(session, interaction, vatsimRatingEmbed(info, st))
 	},
 
 	"pilotrating": func(session *discordgo.Session, interaction *discordgo.InteractionCreate) {
+		st := SettingsOf(interaction)
 		query := getOptions(interaction)["id_or_name"].StringValue()
 		var info vatsim.PilotRatingInfo
 		var err error
@@ -618,10 +671,11 @@ var CommandHandlers = map[string]func(session *discordgo.Session, interaction *d
 			respondError(session, interaction, err.Error())
 			return
 		}
-		respond(session, interaction, vatsimPilotRatingEmbed(info))
+		respond(session, interaction, vatsimPilotRatingEmbed(info, st))
 	},
 
 	"militaryrating": func(session *discordgo.Session, interaction *discordgo.InteractionCreate) {
+		st := SettingsOf(interaction)
 		query := getOptions(interaction)["id_or_name"].StringValue()
 		var info vatsim.MilitaryRatingInfo
 		var err error
@@ -634,6 +688,6 @@ var CommandHandlers = map[string]func(session *discordgo.Session, interaction *d
 			respondError(session, interaction, err.Error())
 			return
 		}
-		respond(session, interaction, vatsimMilitaryRatingEmbed(info))
+		respond(session, interaction, vatsimMilitaryRatingEmbed(info, st))
 	},
 }
