@@ -3,7 +3,10 @@
 A Discord bot that lets you look up live flight and ATC information from the **VATSIM** and **IVAO** networks directly in your Discord server, with a route map for every flight, and that can announce the upcoming network events as native Discord events.
 
 ---
+## Invite Link from discord :
+https://discord.com/oauth2/authorize?client_id=1477247035018055811
 
+--
 ## Features
 
 - **Both networks at once** — every lookup searches VATSIM and IVAO and shows a result for each network where the pilot or controller is found (or restrict it to one network with the `network` option)
