@@ -11,6 +11,7 @@ import (
 	"github.com/Skyfield1888/virtualflightwatcher/api/vatsim"
 	"github.com/Skyfield1888/virtualflightwatcher/config"
 	"github.com/Skyfield1888/virtualflightwatcher/discord_utils/commands"
+	"github.com/Skyfield1888/virtualflightwatcher/discord_utils/events"
 	"github.com/bwmarrin/discordgo"
 	_ "github.com/joho/godotenv/autoload"
 )
@@ -51,6 +52,7 @@ func main() {
 
 	vatsim.StartVatsimApi()
 	ivao.StartIvaoApi()
+	events.Start(discord)
 	defer discord.Close()
 
 	fmt.Println("Bot is running. Press CTRL+C to exit.")

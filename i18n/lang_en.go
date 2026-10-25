@@ -60,5 +60,9 @@ func init() {
 		"cfg.units.imperial":   "Imperial (ft, mph, inHg, mi)",
 		"cfg.scope.guild":      "Applies to this whole server",
 		"cfg.scope.user":       "Applies to your DMs only",
+		"cfg.events":           "Event announcements",
+		"ev.airports":          "Airports",
+		"ev.organisers":        "Organisers",
+		"ev.more_info":         "More info",
 	}
 }

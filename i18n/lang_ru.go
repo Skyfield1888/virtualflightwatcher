@@ -60,5 +60,9 @@ func init() {
 		"cfg.units.imperial":   "Имперские (ft, mph, inHg, mi)",
 		"cfg.scope.guild":      "Действует для всего сервера",
 		"cfg.scope.user":       "Действует только в ваших личных сообщениях",
+		"cfg.events":           "Анонсы событий",
+		"ev.airports":          "Аэропорты",
+		"ev.organisers":        "Организаторы",
+		"ev.more_info":         "Подробнее",
 	}
 }

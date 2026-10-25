@@ -60,5 +60,9 @@ func init() {
 		"cfg.units.imperial":   "İngiliz (ft, mph, inHg, mi)",
 		"cfg.scope.guild":      "Tüm sunucu için geçerli",
 		"cfg.scope.user":       "Yalnızca özel mesajlarınız için geçerli",
+		"cfg.events":           "Etkinlik duyuruları",
+		"ev.airports":          "Havalimanları",
+		"ev.organisers":        "Organizatörler",
+		"ev.more_info":         "Daha fazla bilgi",
 	}
 }

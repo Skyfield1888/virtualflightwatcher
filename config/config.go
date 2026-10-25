@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	"github.com/Skyfield1888/virtualflightwatcher/i18n"
@@ -20,17 +21,69 @@ const (
 	UnitsImperial = "imperial" // ft, mph, inHg, mi
 )
 
+// EventsMode says which networks' events are announced as Discord scheduled events.
+type EventsMode string
+
+const (
+	EventsNone   EventsMode = "none"
+	EventsVatsim EventsMode = "vatsim"
+	EventsIvao   EventsMode = "ivao"
+	EventsBoth   EventsMode = "both"
+)
+
+func (m EventsMode) Valid() bool {
+	return m == EventsNone || m.Active()
+}
+
+// Active is true when at least one network is announced.
+func (m EventsMode) Active() bool {
+	return m == EventsVatsim || m == EventsIvao || m == EventsBoth
+}
+
+// Wants reports whether events of the given network (NetworkVatsim / NetworkIvao) are announced.
+func (m EventsMode) Wants(network string) bool {
+	switch m {
+	case EventsBoth:
+		return network == NetworkVatsim || network == NetworkIvao
+	case EventsVatsim:
+		return network == NetworkVatsim
+	case EventsIvao:
+		return network == NetworkIvao
+	}
+	return false
+}
+
+// UnmarshalJSON also accepts the old boolean format (true = both networks, false = none).
+func (m *EventsMode) UnmarshalJSON(b []byte) error {
+	switch string(b) {
+	case "true":
+		*m = EventsBoth
+		return nil
+	case "false", "null":
+		*m = EventsNone
+		return nil
+	}
+	var s string
+	if err := json.Unmarshal(b, &s); err != nil {
+		return err
+	}
+	*m = EventsMode(s)
+	return nil
+}
+
 type Settings struct {
-	Language         i18n.Lang `json:"language"`
-	Ephemeral        bool      `json:"ephemeral"`
-	Units            string    `json:"units"`
-	AllowedChannelID string    `json:"allowed_channel_id"`
+	Language         i18n.Lang  `json:"language"`
+	Ephemeral        bool       `json:"ephemeral"`
+	Units            string     `json:"units"`
+	AllowedChannelID string     `json:"allowed_channel_id"`
+	Events           EventsMode `json:"events"`
 }
 
 func Defaults() Settings {
 	return Settings{
 		Language: i18n.Default,
 		Units:    UnitsAviation,
+		Events:   EventsNone,
 	}
 }
 
@@ -81,6 +134,19 @@ func Reset(key string) error {
 	return save()
 }
 
+// EventGuilds returns the servers (not DM users) that enabled event announcements.
+func EventGuilds() []string {
+	mu.RLock()
+	defer mu.RUnlock()
+	var out []string
+	for k, s := range data {
+		if s.Events.Active() && !strings.HasPrefix(k, "user:") {
+			out = append(out, k)
+		}
+	}
+	return out
+}
+
 func withDefaults(s Settings) Settings {
 	d := Defaults()
 	if !i18n.Valid(s.Language) {
@@ -90,6 +156,9 @@ func withDefaults(s Settings) Settings {
 	case UnitsAviation, UnitsMetric, UnitsImperial:
 	default:
 		s.Units = d.Units
+	}
+	if !s.Events.Valid() {
+		s.Events = d.Events
 	}
 	return s
 }

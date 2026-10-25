@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/Skyfield1888/virtualflightwatcher/config"
+	"github.com/Skyfield1888/virtualflightwatcher/discord_utils/events"
 	"github.com/Skyfield1888/virtualflightwatcher/i18n"
 	"github.com/bwmarrin/discordgo"
 )
@@ -55,6 +56,16 @@ func configCommand() *discordgo.ApplicationCommand {
 				Description: "Allow bot commands in every channel again (removes the channel restriction)",
 			},
 			{
+				Type: discordgo.ApplicationCommandOptionString, Name: "events",
+				Description: "Create Discord events for the upcoming events of a network (or none)",
+				Choices: []*discordgo.ApplicationCommandOptionChoice{
+					{Name: "VATSIM", Value: string(config.EventsVatsim)},
+					{Name: "IVAO", Value: string(config.EventsIvao)},
+					{Name: "VATSIM + IVAO", Value: string(config.EventsBoth)},
+					{Name: "None (remove the events created by the bot)", Value: string(config.EventsNone)},
+				},
+			},
+			{
 				Type: discordgo.ApplicationCommandOptionBoolean, Name: "reset",
 				Description: "Reset every setting to its default value (applied before the other options)",
 			},
@@ -80,6 +91,8 @@ func handleConfig(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	key := settingsKey(i)
 	resetOnly := len(opts) == 1 && opts["reset"] != nil
 
+	eventsBefore := config.Get(key).Events
+
 	var err error
 	if o, ok := opts["reset"]; ok && o.BoolValue() {
 		err = config.Reset(key)
@@ -103,12 +116,23 @@ func handleConfig(s *discordgo.Session, i *discordgo.InteractionCreate) {
 			if o, ok := opts["channel"]; ok {
 				c.AllowedChannelID, _ = o.Value.(string) // channel options carry the channel ID
 			}
+			if o, ok := opts["events"]; ok {
+				if mode := config.EventsMode(o.StringValue()); mode.Valid() {
+					c.Events = mode
+				}
+			}
 		})
 	}
 	if err != nil {
 		fmt.Println("config error:", err)
 		respondError(s, i, err.Error())
 		return
+	}
+
+	// Events mode changed in a server: remove the bot's events of the networks no longer wanted and
+	// create the missing ones right away. Comparing before/after also covers "reset".
+	if i.GuildID != "" && config.Get(key).Events != eventsBefore {
+		go events.ApplyGuild(s, i.GuildID)
 	}
 
 	// Re-read settings so the confirmation is already in the newly selected language.
@@ -138,6 +162,16 @@ func configEmbed(i *discordgo.InteractionCreate) *discordgo.MessageEmbed {
 		onOff = t("cfg.on")
 	}
 
+	evOnOff := t("cfg.off") // "none"
+	switch st.Events {
+	case config.EventsVatsim:
+		evOnOff = "VATSIM"
+	case config.EventsIvao:
+		evOnOff = "IVAO"
+	case config.EventsBoth:
+		evOnOff = "VATSIM + IVAO"
+	}
+
 	channel := t("cfg.all_channels")
 	if st.AllowedChannelID != "" {
 		channel = "<#" + st.AllowedChannelID + ">"
@@ -157,6 +191,7 @@ func configEmbed(i *discordgo.InteractionCreate) *discordgo.MessageEmbed {
 			{Name: t("cfg.ephemeral"), Value: onOff, Inline: true},
 			{Name: t("cfg.units"), Value: t("cfg.units." + st.Units), Inline: true},
 			{Name: t("cfg.channel"), Value: channel, Inline: true},
+			{Name: t("cfg.events"), Value: evOnOff, Inline: true},
 		},
 	}
 }
