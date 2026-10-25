@@ -12,6 +12,7 @@ import (
 	"github.com/Skyfield1888/virtualflightwatcher/config"
 	"github.com/Skyfield1888/virtualflightwatcher/discord_utils/commands"
 	"github.com/Skyfield1888/virtualflightwatcher/discord_utils/events"
+	"github.com/Skyfield1888/virtualflightwatcher/discord_utils/presence"
 	"github.com/bwmarrin/discordgo"
 	_ "github.com/joho/godotenv/autoload"
 )
@@ -24,6 +25,11 @@ func main() {
 	if err := config.Load(settingsPath); err != nil {
 		fmt.Println("Error loading settings:", err)
 		return
+	}
+
+	watchPath := os.Getenv("WATCH_PATH")
+	if watchPath == "" {
+		watchPath = "data/watches.json"
 	}
 
 	token := os.Getenv("DISCORD_TOKEN")
@@ -53,6 +59,7 @@ func main() {
 	vatsim.StartVatsimApi()
 	ivao.StartIvaoApi()
 	events.Start(discord)
+	presence.Start(discord)
 	defer discord.Close()
 
 	fmt.Println("Bot is running. Press CTRL+C to exit.")
