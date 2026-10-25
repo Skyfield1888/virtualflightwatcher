@@ -208,7 +208,6 @@ External services: VATSIM and IVAO data and events feeds, [Mapbox](https://www.m
 - [x] Translations and bot settings
 - [x] Event announcements (VATSIM and IVAO events)
 - [x] Choose the network(s) of the announced events (VATSIM / IVAO / both)
-- [ ] Prefile notifications on new prefiles for a set facility, for controllers
 
 ---
 
